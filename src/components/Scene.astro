@@ -1,0 +1,48 @@
+---
+/**
+ * Drop-in three.js scene. Renders a host the registry auto-mounts on the client.
+ * Usage: <Scene name="protein" /> or <Scene name="molecule" pdb="caffeine" />
+ */
+import { url } from '@/lib/site';
+
+interface Props {
+  name: 'network' | 'molecule' | 'protein' | 'density' | 'landscape';
+  /** pdb filename (without extension) for the molecule scene */
+  pdb?: string;
+  class?: string;
+  label?: string;
+  /** height when not absolutely positioned by the parent */
+  height?: string;
+}
+
+const { name, pdb, class: klass = '', label, height } = Astro.props;
+const labels: Record<string, string> = {
+  network: 'A network of molecules drifting and forming transient bonds.',
+  molecule: 'A rotating ball-and-stick model of a real molecule.',
+  protein: 'A protein backbone folding into its structure.',
+  density: 'A molecular electron-density isosurface flexing in real time.',
+  landscape: 'An energy landscape with a marker performing gradient descent.',
+};
+---
+
+<div
+  class={`scene-host scene-embed ${klass}`}
+  data-scene={name}
+  data-pdb={pdb ? url(`/pdb/${pdb}.pdb`) : undefined}
+  role="img"
+  aria-label={label ?? labels[name]}
+  style={height ? `height:${height}` : undefined}
+>
+</div>
+
+<script>
+  import { autoMountScenes } from '@/lib/three/registry';
+  const run = () => autoMountScenes();
+  if (document.readyState !== 'loading') run();
+  else document.addEventListener('DOMContentLoaded', run);
+  document.addEventListener('astro:page-load', run);
+</script>
+
+<style>
+  .scene-embed { width: 100%; min-height: 240px; }
+</style>

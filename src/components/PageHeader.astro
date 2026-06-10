@@ -1,0 +1,33 @@
+---
+interface Props {
+  eyebrow: string;
+  title: string;
+  lede?: string;
+}
+const { eyebrow, title, lede } = Astro.props;
+---
+
+<header class="ph">
+  <div class="wrap">
+    <p class="eyebrow ph__eyebrow" data-reveal>{eyebrow}</p>
+    <h1 class="display ph__title" data-reveal set:html={title}></h1>
+    {lede && <p class="ph__lede muted" data-reveal>{lede}</p>}
+  </div>
+  <div class="ph__grid" aria-hidden="true"></div>
+</header>
+
+<style>
+  .ph { position: relative; padding-top: 9rem; padding-bottom: 2.5rem; overflow: hidden; }
+  .ph__eyebrow { margin-bottom: 1.2rem; }
+  .ph__title { font-size: clamp(2.6rem, 1.8rem + 5vw, 6rem); }
+  .ph__lede { max-width: 52ch; margin-top: 1.4rem; font-size: clamp(1.05rem, 1rem + 0.4vw, 1.3rem); }
+  .ph__grid {
+    position: absolute; inset: 0; z-index: -1; opacity: 0.5;
+    background-image:
+      linear-gradient(var(--line) 1px, transparent 1px),
+      linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 64px 64px;
+    mask-image: radial-gradient(120% 80% at 50% 0%, #000 20%, transparent 75%);
+    -webkit-mask-image: radial-gradient(120% 80% at 50% 0%, #000 20%, transparent 75%);
+  }
+</style>

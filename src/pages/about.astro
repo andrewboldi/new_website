@@ -1,0 +1,138 @@
+---
+import Base from '@/layouts/Base.astro';
+import PageHeader from '@/components/PageHeader.astro';
+import Scene from '@/components/Scene.astro';
+import { SITE, SOCIALS } from '@/lib/site';
+import { POLYMATH, COURSEWORK } from '@/lib/data';
+---
+
+<Base title="About" description="Andrew Boldi — chemical biologist, computer scientist, pianist, and incorrigible polymath.">
+  <PageHeader
+    eyebrow="About · who I am"
+    title="A chemist who<br/>learned to compute."
+  />
+
+  <!-- ===== BIO ===== -->
+  <section class="section bio">
+    <div class="wrap bio__grid">
+      <div class="bio__text" data-reveal>
+        <p class="bio__lead">
+          I’m Andrew — a senior at <strong>UC Berkeley</strong> finishing a B.S. in
+          Chemical Biology and a B.A. in Computer Science. I spend my time at the seam
+          between the two: teaching machines to understand molecules, proteins, and the
+          physics underneath them.
+        </p>
+        <p>
+          Right now I’m an AI intern at <strong>Soley Therapeutics</strong>, working on
+          molecular machine learning for drug discovery — explainability, generative
+          chemistry, and foundation models for molecular property prediction. Before that
+          I spent three years in <strong>Brian Stoltz’s lab at Caltech</strong> doing
+          total synthesis at the bench and computational modeling in ORCA, and writing
+          software to automate the lab around me.
+        </p>
+        <p>
+          I’m a polymath by temperament. I’ve shipped apps used by tens of thousands of
+          people, reverse-engineered M68k assembly, 3D-printed replacement lab parts, and
+          turned prime numbers into music. The throughline is simple: <em>I want to solve
+          the hardest problems in science, and I think computation is how we get there.</em>
+        </p>
+        <div class="bio__links">
+          {SOCIALS.map((s) => (
+            <a class="btn" href={s.href} target="_blank" rel="noopener noreferrer">{s.label} ↗</a>
+          ))}
+        </div>
+      </div>
+
+      <aside class="bio__side" data-reveal data-reveal-delay="120">
+        <div class="bio__scene"><Scene name="protein" /></div>
+        <dl class="facts">
+          <div><dt>Now</dt><dd>AI Intern, Soley Therapeutics</dd></div>
+          <div><dt>Study</dt><dd>Chem Bio + CS, UC Berkeley</dd></div>
+          <div><dt>Based</dt><dd>{SITE.location}</dd></div>
+          <div><dt>Grad</dt><dd>June 2027</dd></div>
+        </dl>
+        <p class="bio__caption faint mono">↑ Crambin (1CRN) — a 46-residue protein, folding.</p>
+      </aside>
+    </div>
+  </section>
+
+  <!-- ===== POLYMATH ===== -->
+  <section class="section poly">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow" data-reveal>Beyond the lab</p>
+        <h2 class="display sec-title" data-reveal>The other half<br/>of the brain.</h2>
+      </header>
+      <div class="poly__grid">
+        {POLYMATH.map((p, i) => (
+          <article class="card ticks poly__card" data-reveal data-reveal-delay={i * 70}>
+            <div class="poly__top">
+              <h3 class="poly__title">{p.title}</h3>
+              {p.stat && <span class="poly__stat mono">{p.stat}</span>}
+            </div>
+            <ul class="poly__lines">
+              {p.lines.map((l) => <li>{l}</li>)}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== COURSEWORK ===== -->
+  <section class="section course">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow" data-reveal>Foundations</p>
+        <h2 class="display sec-title" data-reveal>What I’ve studied.</h2>
+      </header>
+      <div class="course__grid">
+        {Object.entries(COURSEWORK).map(([area, items], i) => (
+          <div class="course__col" data-reveal data-reveal-delay={i * 60}>
+            <p class="course__area mono">{area}</p>
+            <ul>{items.map((c) => <li>{c}</li>)}</ul>
+          </div>
+        ))}
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .sec-title { font-size: clamp(2rem, 1.4rem + 3vw, 3.6rem); margin-top: 0.5rem; }
+
+  /* bio */
+  .bio__grid { display: grid; grid-template-columns: 1.4fr 1fr; gap: 3.5rem; align-items: start; }
+  .bio__text { font-size: 1.1rem; line-height: 1.75; color: #cdd6ea; display: flex; flex-direction: column; gap: 1.4rem; }
+  .bio__lead { font-size: clamp(1.3rem, 1.1rem + 1vw, 1.7rem); line-height: 1.5; color: var(--ink); }
+  .bio__text strong { color: var(--cyan-soft); font-weight: 600; }
+  .bio__text em { font-family: var(--display); font-style: italic; font-size: 1.1em; color: var(--blue-soft); }
+  .bio__links { display: flex; gap: 0.7rem; flex-wrap: wrap; margin-top: 0.8rem; }
+
+  .bio__scene { height: 320px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle at 50% 40%, rgba(0,153,255,0.08), transparent 70%); }
+  .facts { margin: 1.5rem 0 0.6rem; display: flex; flex-direction: column; gap: 0; }
+  .facts div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
+  .facts dt { font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-faint); }
+  .facts dd { margin: 0; text-align: right; font-size: 0.9rem; color: var(--ink); }
+  .bio__caption { font-size: 0.72rem; margin-top: 0.4rem; }
+
+  /* polymath */
+  .poly__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
+  .poly__top { display: flex; justify-content: space-between; align-items: baseline; gap: 1rem; }
+  .poly__title { font-size: 1.5rem; font-family: var(--display); }
+  .poly__stat { color: var(--amber); font-size: 0.92rem; }
+  .poly__lines { margin: 1rem 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.5rem; }
+  .poly__lines li { font-size: 0.94rem; color: #c2cce0; }
+  .poly__lines li::marker { color: var(--cyan); }
+
+  /* coursework */
+  .course__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2rem; }
+  .course__area { color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.08em; padding-bottom: 0.8rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
+  .course__col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
+  .course__col li { font-size: 0.92rem; color: var(--ink-dim); padding-left: 1rem; position: relative; }
+  .course__col li::before { content: '→'; position: absolute; left: 0; color: var(--ink-faint); }
+
+  @media (max-width: 860px) {
+    .bio__grid { grid-template-columns: 1fr; }
+  }
+</style>

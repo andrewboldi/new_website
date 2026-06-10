@@ -1,0 +1,129 @@
+---
+import Base from '@/layouts/Base.astro';
+import PageHeader from '@/components/PageHeader.astro';
+import Scene from '@/components/Scene.astro';
+import { EXPERIENCE, PROJECTS } from '@/lib/data';
+---
+
+<Base title="Work" description="Research, internships, and projects — from total synthesis at Caltech to molecular ML at Soley Therapeutics.">
+  <PageHeader
+    eyebrow="Work · research & projects"
+    title="What I’ve built,<br/>and figured out."
+    lede="A decade of curiosity, roughly: molecular machine learning, total synthesis at the bench, deep learning systems, and a long tail of things made because they were interesting."
+  />
+
+  <!-- ===== EXPERIENCE / RESEARCH ===== -->
+  <section class="section xp">
+    <div class="wrap">
+      <h2 class="sec-title display" data-reveal>Research &amp; work</h2>
+      <div class="xp__list">
+        {EXPERIENCE.map((e, i) => (
+          <article class="xp__item" data-reveal data-reveal-delay={i * 70}>
+            <div class="xp__rail" aria-hidden="true"><span class="xp__dot"></span></div>
+            <div class="xp__when mono">
+              <span class={`xp__kind xp__kind--${e.kind}`}>{e.kind}</span>
+              <span>{e.when}</span>
+              <span class="faint">{e.where}</span>
+            </div>
+            <div class="xp__body card ticks">
+              <h3 class="xp__role">{e.role}</h3>
+              <p class="xp__org">{e.org} <span class="faint">· {e.detail}</span></p>
+              <ul class="xp__highlights">
+                {e.highlights.map((h) => <li>{h}</li>)}
+              </ul>
+              {e.link && (
+                <a class="xp__link mono" href={e.link.href} target="_blank" rel="noopener noreferrer">
+                  {e.link.label} ↗
+                </a>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== INTERLUDE SCENE ===== -->
+  <section class="interlude">
+    <Scene name="molecule" pdb="aspirin" class="interlude__scene" />
+    <div class="wrap interlude__text">
+      <p class="eyebrow" data-reveal>At the bench &amp; in silico</p>
+      <p class="interlude__quote display" data-reveal>
+        “Sixteen consecutive steps toward a diterpenoid — then teaching a model to plan the
+        route itself.”
+      </p>
+    </div>
+  </section>
+
+  <!-- ===== PROJECTS ===== -->
+  <section class="section projects">
+    <div class="wrap">
+      <h2 class="sec-title display" data-reveal>Selected projects</h2>
+      <div class="projects__grid">
+        {PROJECTS.map((p, i) => (
+          <article class={`card ticks proj ${p.featured ? 'proj--feat' : ''}`} data-reveal data-reveal-delay={(i % 3) * 60}>
+            <div class="proj__top">
+              <h3 class="proj__name">{p.name}</h3>
+              {p.featured && <span class="tag tag--accent">Featured</span>}
+            </div>
+            <p class="proj__blurb muted">{p.blurb}</p>
+            <div class="proj__foot">
+              <div class="proj__tags">{p.tags.map((t) => <span class="tag">{t}</span>)}</div>
+              {p.link && (
+                <a class="proj__link mono" href={p.link.href} target="_blank" rel="noopener noreferrer">
+                  {p.link.label} ↗
+                </a>
+              )}
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .sec-title { font-size: clamp(1.8rem, 1.4rem + 2.4vw, 3.2rem); margin-bottom: 2.5rem; }
+
+  /* experience timeline */
+  .xp__list { display: flex; flex-direction: column; gap: 2.5rem; }
+  .xp__item { display: grid; grid-template-columns: 16px 200px 1fr; gap: 1.4rem; align-items: start; }
+  .xp__rail { position: relative; height: 100%; display: flex; justify-content: center; }
+  .xp__rail::before { content: ''; position: absolute; top: 6px; bottom: -2.5rem; width: 1px; background: var(--line); }
+  .xp__item:last-child .xp__rail::before { display: none; }
+  .xp__dot { width: 11px; height: 11px; border-radius: 50%; background: var(--cyan); margin-top: 5px; box-shadow: var(--glow-cyan); }
+  .xp__when { display: flex; flex-direction: column; gap: 0.35rem; font-size: 0.76rem; padding-top: 2px; }
+  .xp__kind { width: fit-content; text-transform: uppercase; letter-spacing: 0.14em; font-size: 0.62rem; padding: 0.2em 0.6em; border-radius: 100px; border: 1px solid var(--line-2); }
+  .xp__kind--work { color: var(--blue-soft); border-color: rgba(0,153,255,0.3); }
+  .xp__kind--research { color: var(--cyan); border-color: rgba(56,232,200,0.3); }
+  .xp__role { font-size: 1.3rem; }
+  .xp__org { color: var(--ink-dim); margin-top: 0.2rem; font-size: 0.95rem; }
+  .xp__highlights { margin: 1.1rem 0 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.55rem; }
+  .xp__highlights li { font-size: 0.95rem; color: #c2cce0; }
+  .xp__highlights li::marker { color: var(--cyan); }
+  .xp__link { display: inline-block; margin-top: 1.1rem; color: var(--blue-soft); font-size: 0.82rem; }
+  .xp__link:hover { color: var(--cyan); }
+
+  /* interlude */
+  .interlude { position: relative; min-height: 70vh; display: flex; align-items: center; overflow: hidden; margin: 3rem 0; }
+  .interlude__scene { position: absolute; inset: 0; }
+  .interlude__text { position: relative; z-index: 2; pointer-events: none; }
+  .interlude__quote { font-size: clamp(1.6rem, 1.2rem + 2.6vw, 3.4rem); max-width: 22ch; margin-top: 1rem; text-shadow: 0 4px 40px var(--bg); }
+
+  /* projects */
+  .projects__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
+  .proj { display: flex; flex-direction: column; min-height: 230px; }
+  .proj--feat { border-color: rgba(56,232,200,0.22); }
+  .proj__top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+  .proj__name { font-size: 1.4rem; font-family: var(--display); }
+  .proj__blurb { margin-top: 0.8rem; font-size: 0.95rem; flex: 1; }
+  .proj__foot { margin-top: 1.2rem; }
+  .proj__tags { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
+  .proj__link { color: var(--blue-soft); font-size: 0.8rem; }
+  .proj__link:hover { color: var(--cyan); }
+
+  @media (max-width: 760px) {
+    .xp__item { grid-template-columns: 1fr; }
+    .xp__rail { display: none; }
+  }
+</style>

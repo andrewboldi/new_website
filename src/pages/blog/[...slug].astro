@@ -1,0 +1,121 @@
+---
+import Base from '@/layouts/Base.astro';
+import Scene from '@/components/Scene.astro';
+import { url } from '@/lib/site';
+import { getCollection, render } from 'astro:content';
+
+export async function getStaticPaths() {
+  const posts = await getCollection('blog');
+  return posts.map((post) => ({ params: { slug: post.id }, props: { post } }));
+}
+
+const { post } = Astro.props;
+const { Content, headings } = await render(post);
+const fmt = (d: Date) =>
+  new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
+
+const all = (await getCollection('blog'))
+  .filter((p) => !p.data.draft)
+  .sort((a, b) => +new Date(b.data.date) - +new Date(a.data.date));
+const idx = all.findIndex((p) => p.id === post.id);
+const next = all[(idx + 1) % all.length];
+---
+
+<Base title={post.data.title} description={post.data.summary}>
+  <link
+    rel="stylesheet"
+    href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css"
+    integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+"
+    crossorigin="anonymous"
+  />
+
+  <article class="post">
+    {post.data.scene && (
+      <div class="post__scene">
+        <Scene name={post.data.scene} class="post__scene-host" />
+        <div class="post__scene-fade"></div>
+      </div>
+    )}
+
+    <header class="post__head wrap">
+      <a class="post__back mono" href={url('/blog')}>← Writing</a>
+      <div class="post__meta mono">
+        <time>{fmt(post.data.date)}</time>
+        <span>·</span>
+        {post.data.tags.map((t) => <span class="post__tag">{t}</span>)}
+      </div>
+      <h1 class="display post__title">{post.data.title}</h1>
+      {post.data.summary && <p class="post__lede muted">{post.data.summary}</p>}
+    </header>
+
+    <div class="post__body wrap">
+      {headings.length > 2 && (
+        <aside class="toc" aria-label="Table of contents">
+          <p class="eyebrow">Contents</p>
+          <ul>
+            {headings.filter((h) => h.depth <= 2).map((h) => (
+              <li><a href={`#${h.slug}`}>{h.text}</a></li>
+            ))}
+          </ul>
+        </aside>
+      )}
+      <div class="prose">
+        <Content />
+      </div>
+    </div>
+
+    <nav class="post__next wrap">
+      <a class="card ticks post__next-card" href={url(`/blog/${next.id}`)}>
+        <span class="eyebrow">Read next</span>
+        <span class="display post__next-title">{next.data.title}</span>
+      </a>
+    </nav>
+  </article>
+</Base>
+
+<style is:global>
+  .post { padding-bottom: 4rem; }
+  .post__scene { position: relative; height: 46vh; min-height: 320px; margin-bottom: -8vh; }
+  .post__scene-host { position: absolute; inset: 0; }
+  .post__scene-fade { position: absolute; inset: 0; pointer-events: none; background: linear-gradient(180deg, rgba(6,8,15,0.4) 0%, transparent 30%, transparent 60%, var(--bg) 100%); }
+  .post__head { position: relative; padding-top: 7rem; }
+  .post__scene + .post__head { padding-top: 2rem; }
+  .post__back { display: inline-block; color: var(--ink-dim); margin-bottom: 2rem; transition: color 0.3s; }
+  .post__back:hover { color: var(--cyan); }
+  .post__meta { display: flex; gap: 0.7rem; flex-wrap: wrap; align-items: center; color: var(--ink-faint); font-size: 0.76rem; }
+  .post__tag { color: var(--cyan); }
+  .post__title { font-size: clamp(2.4rem, 1.8rem + 4vw, 5rem); margin: 1rem 0; max-width: 18ch; }
+  .post__lede { font-size: clamp(1.1rem, 1rem + 0.6vw, 1.4rem); max-width: 56ch; }
+
+  .post__body { display: grid; grid-template-columns: 1fr; gap: 3rem; margin-top: 3.5rem; }
+  @media (min-width: 1000px) {
+    .post__body { grid-template-columns: 220px minmax(0, 1fr); }
+    .toc { position: sticky; top: 6rem; align-self: start; }
+  }
+  .toc ul { list-style: none; padding: 0; margin: 0.8rem 0 0; display: flex; flex-direction: column; gap: 0.5rem; }
+  .toc a { font-size: 0.86rem; color: var(--ink-dim); transition: color 0.3s, padding 0.3s; }
+  .toc a:hover { color: var(--cyan); padding-left: 4px; }
+
+  /* ---------- prose ---------- */
+  .prose { max-width: 70ch; font-size: 1.12rem; line-height: 1.75; color: #cfd8ea; }
+  .prose > * + * { margin-top: 1.3rem; }
+  .prose h2 { font-family: var(--display); font-size: 1.9rem; color: var(--ink); margin-top: 3rem; letter-spacing: -0.01em; }
+  .prose h3 { font-family: var(--display); font-size: 1.4rem; color: var(--ink); margin-top: 2rem; }
+  .prose strong { color: var(--ink); font-weight: 600; }
+  .prose em { color: var(--cyan-soft); }
+  .prose a { color: var(--blue-soft); }
+  .prose blockquote { border-left: 2px solid var(--cyan); padding-left: 1.2rem; color: var(--ink-dim); font-style: italic; }
+  .prose code { font-family: var(--mono); font-size: 0.88em; background: var(--surface-2); padding: 0.15em 0.45em; border-radius: 6px; color: var(--cyan-soft); }
+  .prose pre { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius); padding: 1.2rem; overflow-x: auto; }
+  .prose pre code { background: none; padding: 0; color: inherit; }
+  .prose ol, .prose ul { padding-left: 1.4rem; }
+  .prose li { margin-top: 0.6rem; }
+  .prose li::marker { color: var(--cyan); }
+  .prose hr { border: 0; border-top: 1px solid var(--line); margin: 2.5rem 0; }
+  .prose .footnotes { margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); font-size: 0.92rem; color: var(--ink-dim); }
+
+  .post__next { margin-top: 4rem; }
+  .post__next-card { display: flex; flex-direction: column; gap: 0.6rem; }
+  .post__next-title { font-size: clamp(1.4rem, 1.1rem + 1.4vw, 2.2rem); transition: color 0.3s; }
+  .post__next-card:hover .post__next-title { color: var(--cyan-soft); }
+</style>

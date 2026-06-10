@@ -1,0 +1,58 @@
+---
+import Base from '@/layouts/Base.astro';
+import PageHeader from '@/components/PageHeader.astro';
+import { url } from '@/lib/site';
+import { getCollection } from 'astro:content';
+
+const posts = (await getCollection('blog'))
+  .filter((p) => !p.data.draft)
+  .sort((a, b) => +new Date(b.data.date) - +new Date(a.data.date));
+
+const fmt = (d: Date) =>
+  new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'short', day: 'numeric' });
+---
+
+<Base title="Writing" description="Notes on machine learning, chemistry, interpretability, and how to think.">
+  <PageHeader
+    eyebrow="Writing · the notebook"
+    title="Notes from the<br/>edge of what I know."
+    lede="Working through machine learning, interpretability, computational chemistry, and the habits of thought that hold them together. Some are finished; some are evolving."
+  />
+
+  <section class="section blog">
+    <div class="wrap">
+      <ol class="entries">
+        {posts.map((p, i) => (
+          <li class="entry card ticks" data-reveal data-reveal-delay={i * 60}>
+            <a class="entry__link" href={url(`/blog/${p.id}`)}>
+              <div class="entry__top">
+                <span class="entry__no mono">{String(i + 1).padStart(2, '0')}</span>
+                <time class="entry__date mono">{fmt(p.data.date)}</time>
+              </div>
+              <h2 class="entry__title display">{p.data.title}</h2>
+              {p.data.summary && <p class="entry__summary muted">{p.data.summary}</p>}
+              <div class="entry__tags">
+                {p.data.tags.map((t) => <span class="tag">{t}</span>)}
+                <span class="entry__arrow" aria-hidden="true">Read →</span>
+              </div>
+            </a>
+          </li>
+        ))}
+      </ol>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .entries { list-style: none; padding: 0; margin: 0; display: grid; gap: 1rem; }
+  .entry { padding: 0; overflow: hidden; }
+  .entry__link { display: block; padding: clamp(1.4rem, 3vw, 2.2rem); }
+  .entry__top { display: flex; justify-content: space-between; align-items: center; color: var(--ink-faint); font-size: 0.74rem; }
+  .entry__no { color: var(--cyan); }
+  .entry__title { font-size: clamp(1.6rem, 1.2rem + 2vw, 2.8rem); margin: 0.8rem 0; transition: color 0.3s; }
+  .entry:hover .entry__title { color: var(--cyan-soft); }
+  .entry__summary { max-width: 64ch; font-size: 1rem; }
+  .entry__tags { display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 1.2rem; }
+  .entry__arrow { margin-left: auto; font-family: var(--mono); font-size: 0.8rem; color: var(--ink-dim); transition: transform 0.3s var(--ease), color 0.3s; }
+  .entry:hover .entry__arrow { color: var(--cyan); transform: translateX(4px); }
+</style>
