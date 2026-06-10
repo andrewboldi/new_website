@@ -197,6 +197,9 @@ p a:hover, .prose a:hover { background-size: 100% 1px; color: var(--cyan-soft); 
 /* ---------- canvas hosts ---------- */
 .scene-host { position: relative; width: 100%; height: 100%; }
 .scene-host canvas { display: block; width: 100% !important; height: 100% !important; }
+/* global helper: fill a positioned parent. Defined globally so it works on
+   elements rendered by child components (Astro scopes per-component styles). */
+.abs-fill { position: absolute; inset: 0; }
 
 /* utility */
 .center { text-align: center; }

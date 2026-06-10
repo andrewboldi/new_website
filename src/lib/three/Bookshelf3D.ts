@@ -112,10 +112,12 @@ export function bookshelf3D(handle: SceneHandle, books: BookData[]) {
   scene.add(root);
 
   // ---- layout across rows ----
+  // The host is a wide, short canvas, so a single row reads best on desktop;
+  // narrow screens wrap to a few rows.
   const mobile = ctx.width < 760;
-  const perRow = mobile ? 4 : Math.min(books.length, 7);
-  const rowGap = 7.2;
-  const slot = 1.25;
+  const perRow = mobile ? 5 : books.length;
+  const rowGap = 8.4;
+  const slot = 1.42;
 
   const bookMeshes: THREE.Mesh[] = [];
   const restState: { x: number; y: number; z: number; rot: number }[] = [];
@@ -129,8 +131,8 @@ export function bookshelf3D(handle: SceneHandle, books: BookData[]) {
     const col = i % perRow;
     const inRow = Math.min(perRow, books.length - row * perRow);
 
-    const height = 5.4 + ((i * 7) % 11) * 0.12;
-    const thickness = 0.78 + ((i * 13) % 9) * 0.05;
+    const height = 6.0 + ((i * 7) % 11) * 0.13;
+    const thickness = 0.9 + ((i * 13) % 9) * 0.055;
 
     const geo = new THREE.BoxGeometry(thickness, height, shelfDepth);
     const spineTex = makeSpineTexture(book);
@@ -161,12 +163,15 @@ export function bookshelf3D(handle: SceneHandle, books: BookData[]) {
     }
   });
 
-  // frame camera to the whole shelf
+  // frame camera to fit the whole shelf (FOV-based)
   const bounds = new THREE.Box3().setFromObject(root);
   const size = bounds.getSize(new THREE.Vector3());
   const center = bounds.getCenter(new THREE.Vector3());
   root.position.sub(center);
-  camera.position.set(0, 0, Math.max(size.x, size.y) * (mobile ? 1.15 : 0.92) + 6);
+  const vFOV = THREE.MathUtils.degToRad(camera.fov);
+  const distH = (size.y / 2) / Math.tan(vFOV / 2);
+  const distW = (size.x / 2) / (Math.tan(vFOV / 2) * camera.aspect);
+  camera.position.set(0, 0.4, Math.max(distH, distW) * 1.06 + size.z * 0.5 + 1.5);
   camera.lookAt(0, 0, 0);
 
   // ---- interaction ----

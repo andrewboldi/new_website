@@ -18,7 +18,7 @@ try {
 <Base>
   <!-- ================= HERO ================= -->
   <section class="hero">
-    <SceneHost id="hero-scene" class="hero__canvas" label="An interactive network of molecules drifting and forming bonds in latent chemical space." />
+    <SceneHost id="hero-scene" class="abs-fill hero__canvas" label="An interactive network of molecules drifting and forming bonds in latent chemical space." />
     <div class="hero__veil"></div>
 
     <div class="wrap hero__content">
@@ -158,12 +158,13 @@ try {
 <style>
   /* ---------- hero ---------- */
   .hero { position: relative; min-height: 100svh; display: flex; align-items: center; overflow: hidden; }
-  .hero__canvas { position: absolute; inset: 0; z-index: 0; }
+  .hero__canvas { z-index: 0; }
   .hero__veil {
     position: absolute; inset: 0; z-index: 1; pointer-events: none;
     background:
       radial-gradient(120% 90% at 50% 120%, var(--bg) 8%, transparent 60%),
-      linear-gradient(180deg, rgba(6,8,15,0.55) 0%, transparent 28%, transparent 60%, var(--bg) 100%);
+      linear-gradient(95deg, rgba(6,8,15,0.82) 0%, rgba(6,8,15,0.5) 32%, rgba(6,8,15,0.12) 55%, transparent 75%),
+      linear-gradient(180deg, rgba(6,8,15,0.5) 0%, transparent 24%, transparent 62%, var(--bg) 100%);
   }
   .hero__content { position: relative; z-index: 2; padding-top: 8rem; padding-bottom: 6rem; }
   .hero__eyebrow { margin-bottom: 1.4rem; }
