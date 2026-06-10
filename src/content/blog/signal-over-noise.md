@@ -3,7 +3,7 @@ title: 'Signal over Noise'
 date: 2025-07-07
 tags: ['Thinking', 'Research']
 summary: 'The single most useful question I keep asking myself, and why staying close to the truth beats being merely excited.'
-scene: 'landscape'
+scene: 'signal'
 ---
 
 It's so imperative to discern the signal over the noise. You need to continually ask

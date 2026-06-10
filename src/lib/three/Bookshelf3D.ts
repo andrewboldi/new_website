@@ -197,30 +197,38 @@ export function bookshelf3D(handle: SceneHandle, books: BookData[]) {
   const onExternal = (e: Event) => { selected = (e as CustomEvent).detail; };
   window.addEventListener('book:set', onExternal);
 
+  let lastHover = -1;
   onFrame((t, dt) => {
     ray.setFromCamera(ndc, camera);
     const hit = ray.intersectObjects(bookMeshes, false)[0];
     hovered = hit ? (hit.object.userData.index as number) : -1;
     renderer.domElement.style.cursor = hovered >= 0 ? 'pointer' : 'default';
+    if (hovered !== lastHover) {
+      lastHover = hovered;
+      window.dispatchEvent(new CustomEvent('book:hover', { detail: hovered }));
+    }
 
     for (let i = 0; i < bookMeshes.length; i++) {
       const m = bookMeshes[i];
       const rest = restState[i];
       const isHot = i === hovered;
       const isSel = i === selected;
-      const outZ = isSel ? 3.4 : isHot ? 1.7 : 0;
-      const tilt = isSel ? -0.28 : isHot ? -0.12 : 0;
-      const lift = isSel ? 0.6 : 0;
+      // pop forward + scale up so the spine reads; lean back only when selected
+      const outZ = isSel ? 3.6 : isHot ? 2.3 : 0;
+      const tilt = isSel ? -0.16 : 0;
+      const lift = isSel ? 0.5 : isHot ? 0.18 : 0;
+      const scl = isSel ? 1.08 : isHot ? 1.05 : 1;
       m.position.z = THREE.MathUtils.lerp(m.position.z, outZ, 0.16);
       m.position.y = THREE.MathUtils.lerp(m.position.y, rest.y + lift, 0.16);
       m.rotation.x = THREE.MathUtils.lerp(m.rotation.x, tilt, 0.16);
-      // subtle emissive on hover/select
+      m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, isHot || isSel ? 0 : rest.rot, 0.16);
+      m.scale.setScalar(THREE.MathUtils.lerp(m.scale.x, scl, 0.16));
+      // brighten the spine on hover/select
       const mats = m.material as THREE.MeshStandardMaterial[];
       const spine = mats[4];
-      const target = isSel ? 0.5 : isHot ? 0.28 : 0;
-      spine.emissive ??= new THREE.Color(PALETTE.cyan);
-      spine.emissiveIntensity = THREE.MathUtils.lerp(spine.emissiveIntensity ?? 0, target, 0.16);
+      const target = isSel ? 0.55 : isHot ? 0.42 : 0;
       spine.emissive.set(PALETTE.cyan);
+      spine.emissiveIntensity = THREE.MathUtils.lerp(spine.emissiveIntensity ?? 0, target, 0.16);
     }
 
     // gentle parallax

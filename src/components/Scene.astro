@@ -5,8 +5,12 @@
  */
 import { url } from '@/lib/site';
 
+type SceneName =
+  | 'network' | 'molecule' | 'protein' | 'density' | 'landscape'
+  | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice';
+
 interface Props {
-  name: 'network' | 'molecule' | 'protein' | 'density' | 'landscape';
+  name: SceneName;
   /** pdb filename (without extension) for the molecule scene */
   pdb?: string;
   class?: string;
@@ -16,12 +20,18 @@ interface Props {
 }
 
 const { name, pdb, class: klass = '', label, height } = Astro.props;
-const labels: Record<string, string> = {
+const labels: Record<SceneName, string> = {
   network: 'A network of molecules drifting and forming transient bonds.',
   molecule: 'A rotating ball-and-stick model of a real molecule.',
   protein: 'A protein backbone folding into its structure.',
   density: 'A molecular electron-density isosurface flexing in real time.',
   landscape: 'An energy landscape with a marker performing gradient descent.',
+  neuralnet: 'A neural network with an activation wave propagating through its layers.',
+  signal: 'A noisy band of points resolving into a clean travelling wave.',
+  orbital: 'A d-orbital electron cloud, colored by wavefunction phase.',
+  helix: 'A DNA double helix turning slowly.',
+  statmech: 'A box of gas particles colored by speed — a live Maxwell–Boltzmann distribution.',
+  lattice: 'A crystalline lattice of atoms.',
 };
 ---
 

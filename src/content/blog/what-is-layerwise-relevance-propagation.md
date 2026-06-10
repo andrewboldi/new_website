@@ -3,7 +3,7 @@ title: 'So what is Layerwise Relevance Propagation?'
 date: 2025-07-07
 tags: ['Machine Learning', 'Interpretability', 'Computer Science']
 summary: 'A primer on LRP — how we attribute a network’s prediction back to its input neurons by treating nonlinearities as first-order Taylor expansions. An evolving note.'
-scene: 'network'
+scene: 'neuralnet'
 ---
 
 Say we have a simple neural network. How do we know which input neurons mattered most for

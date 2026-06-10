@@ -1,6 +1,5 @@
 ---
 import Base from '@/layouts/Base.astro';
-import SceneHost from '@/components/SceneHost.astro';
 import { SITE, SOCIALS, url } from '@/lib/site';
 import { FIELDS, PROJECTS } from '@/lib/data';
 import { getCollection } from 'astro:content';
@@ -16,11 +15,15 @@ try {
 ---
 
 <Base>
+  <!-- persistent morphing background; transforms through Andrew's fields on scroll -->
+  <div class="bg-field" id="bg-field" aria-hidden="true"></div>
+  <div class="field-tag mono" id="field-tag" aria-hidden="true">
+    <span class="field-tag__dot"></span><span id="field-tag-label">latent chemical space</span>
+  </div>
+
   <!-- ================= HERO ================= -->
   <section class="hero">
-    <SceneHost id="hero-scene" class="abs-fill hero__canvas" label="An interactive network of molecules drifting and forming bonds in latent chemical space." />
     <div class="hero__veil"></div>
-
     <div class="wrap hero__content">
       <p class="eyebrow hero__eyebrow" data-h="0">{SITE.school} · Chem Bio × CS</p>
       <h1 class="display hero__title">
@@ -31,12 +34,10 @@ try {
         I solve the hardest problems in science with computation — teaching machines
         the language of <em>molecules</em>, <em>proteins</em>, and <em>matter</em>.
       </p>
-
       <div class="hero__actions" data-h="4">
         <a class="btn btn--solid" href={url('/work')}>Selected work</a>
         <a class="btn" href={url('/about')}>Who I am</a>
       </div>
-
       <ul class="hero__socials" data-h="5">
         {SOCIALS.map((s) => (
           <li><a href={s.href} target="_blank" rel="noopener noreferrer">{s.label}<span class="faint"> ↗</span></a></li>
@@ -45,130 +46,139 @@ try {
     </div>
 
     <div class="hero__scroll" data-h="5" aria-hidden="true">
-      <span class="mono">scroll</span>
+      <span class="mono">scroll to transform</span>
       <span class="hero__scroll-line"></span>
     </div>
-
-    <div class="hero__readout mono" aria-hidden="true">
-      <span>◎ {SITE.location}</span>
-      <span id="hero-fps">— nodes interacting —</span>
-    </div>
+    <div class="hero__readout mono" aria-hidden="true"><span>◎ {SITE.location}</span></div>
   </section>
 
-  <!-- ================= CURRENTLY ================= -->
-  <section class="section now">
-    <div class="wrap">
-      <div class="rule" data-reveal>// status</div>
-      <p class="now__text display" data-reveal>
-        Currently an <a href="https://github.com/andrewboldi">AI intern</a> at
-        <span class="hl">Soley Therapeutics</span> doing molecular machine learning for
-        drug discovery — and finishing a B.S. in Chemical Biology and a B.A. in Computer
-        Science at <span class="hl">UC&nbsp;Berkeley</span>.
-      </p>
-    </div>
-  </section>
-
-  <!-- ================= FIELDS ================= -->
-  <section class="section fields" id="fields">
-    <div class="wrap">
-      <header class="sec-head">
-        <p class="eyebrow" data-reveal>What I work on</p>
-        <h2 class="display sec-title" data-reveal>Six fields, one question:<br/>how does matter compute?</h2>
-      </header>
-      <div class="fields__grid">
-        {FIELDS.map((f, i) => (
-          <article class={`card ticks field field--${f.accent}`} data-reveal data-reveal-delay={i * 60}>
-            <span class="field__idx mono">{String(i + 1).padStart(2, '0')}</span>
-            <h3 class="field__title">{f.title}</h3>
-            <p class="field__blurb muted">{f.blurb}</p>
-          </article>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <!-- ================= SELECTED WORK ================= -->
-  <section class="section work-teaser">
-    <div class="wrap">
-      <header class="sec-head sec-head--row">
-        <div>
-          <p class="eyebrow" data-reveal>Selected work</p>
-          <h2 class="display sec-title" data-reveal>Things I’ve built<br/>and figured out.</h2>
-        </div>
-        <a class="btn" href={url('/work')} data-reveal>All work →</a>
-      </header>
-      <div class="work-teaser__list">
-        {featured.map((p, i) => (
-          <a class="wt" href={p.link?.href ?? url('/work')} target={p.link ? '_blank' : undefined} rel="noopener noreferrer" data-reveal data-reveal-delay={i * 80}>
-            <span class="wt__no mono">{String(i + 1).padStart(2, '0')}</span>
-            <span class="wt__body">
-              <span class="wt__name">{p.name}</span>
-              <span class="wt__blurb muted">{p.blurb}</span>
-              <span class="wt__tags">{p.tags.map((t) => <span class="tag">{t}</span>)}</span>
-            </span>
-            <span class="wt__arrow" aria-hidden="true">↗</span>
-          </a>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <!-- ================= WRITING + BOOKS ================= -->
-  <section class="section split">
-    <div class="wrap split__grid">
-      <div class="split__col" data-reveal>
-        <p class="eyebrow">Writing</p>
-        <h2 class="display split__title">From the notebook</h2>
-        <ul class="post-list">
-          {posts.length === 0 && <li class="muted">Notes are loading…</li>}
-          {posts.map((p) => (
-            <li>
-              <a href={url(`/blog/${p.id ?? p.slug}`)}>
-                <span class="post-list__title">{p.data.title}</span>
-                <span class="post-list__meta mono faint">{new Date(p.data.date).toISOString().slice(0, 10)}</span>
-              </a>
-            </li>
-          ))}
-        </ul>
-        <a class="btn btn--ghost" href={url('/blog')}>All writing →</a>
-      </div>
-
-      <div class="split__col" data-reveal data-reveal-delay="120">
-        <p class="eyebrow">Bookshelf</p>
-        <h2 class="display split__title">What I’m reading</h2>
-        <p class="muted split__books-blurb">
-          A living shelf of the books shaping how I think — biology, ML, physics,
-          chemistry, and the occasional detour. Each with a few honest words.
+  <div class="page-body">
+    <!-- ================= CURRENTLY ================= -->
+    <section class="section now">
+      <div class="wrap">
+        <div class="rule" data-reveal>// status</div>
+        <p class="now__text display" data-reveal>
+          Currently an <a href="https://github.com/andrewboldi">AI intern</a> at
+          <span class="hl">Soley Therapeutics</span> doing molecular machine learning for
+          drug discovery — and finishing a B.S. in Chemical Biology and a B.A. in Computer
+          Science at <span class="hl">UC&nbsp;Berkeley</span>.
         </p>
-        <a class="btn btn--ghost" href={url('/bookshelf')}>Open the shelf →</a>
       </div>
-    </div>
-  </section>
+    </section>
 
-  <!-- ================= CONTACT ================= -->
-  <section class="section contact">
-    <div class="wrap center">
-      <p class="eyebrow" data-reveal>Get in touch</p>
-      <h2 class="display contact__title" data-reveal>Let’s build something<br/>that matters.</h2>
-      <a class="btn btn--solid contact__btn" href={`mailto:${SITE.email}`} data-reveal>{SITE.email}</a>
-    </div>
-  </section>
+    <!-- ================= FIELDS ================= -->
+    <section class="section fields" id="fields">
+      <div class="wrap">
+        <header class="sec-head">
+          <p class="eyebrow" data-reveal>What I work on</p>
+          <h2 class="display sec-title" data-reveal>Six fields, one question:<br/>how does matter compute?</h2>
+        </header>
+        <div class="fields__grid">
+          {FIELDS.map((f, i) => (
+            <article class={`card ticks field field--${f.accent}`} data-reveal data-reveal-delay={i * 60}>
+              <span class="field__idx mono">{String(i + 1).padStart(2, '0')}</span>
+              <h3 class="field__title">{f.title}</h3>
+              <p class="field__blurb muted">{f.blurb}</p>
+            </article>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= SELECTED WORK ================= -->
+    <section class="section work-teaser">
+      <div class="wrap">
+        <header class="sec-head sec-head--row">
+          <div>
+            <p class="eyebrow" data-reveal>Selected work</p>
+            <h2 class="display sec-title" data-reveal>Things I’ve built<br/>and figured out.</h2>
+          </div>
+          <a class="btn" href={url('/work')} data-reveal>All work →</a>
+        </header>
+        <div class="work-teaser__list">
+          {featured.map((p, i) => (
+            <a class="wt" href={p.link?.href ?? url('/work')} target={p.link ? '_blank' : undefined} rel="noopener noreferrer" data-reveal data-reveal-delay={i * 80}>
+              <span class="wt__no mono">{String(i + 1).padStart(2, '0')}</span>
+              <span class="wt__body">
+                <span class="wt__name">{p.name}</span>
+                <span class="wt__blurb muted">{p.blurb}</span>
+                <span class="wt__tags">{p.tags.map((t) => <span class="tag">{t}</span>)}</span>
+              </span>
+              <span class="wt__arrow" aria-hidden="true">↗</span>
+            </a>
+          ))}
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= WRITING + BOOKS ================= -->
+    <section class="section split">
+      <div class="wrap split__grid">
+        <div class="split__col" data-reveal>
+          <p class="eyebrow">Writing</p>
+          <h2 class="display split__title">From the notebook</h2>
+          <ul class="post-list">
+            {posts.length === 0 && <li class="muted">Notes are loading…</li>}
+            {posts.map((p) => (
+              <li>
+                <a href={url(`/blog/${p.id ?? p.slug}`)}>
+                  <span class="post-list__title">{p.data.title}</span>
+                  <span class="post-list__meta mono faint">{new Date(p.data.date).toISOString().slice(0, 10)}</span>
+                </a>
+              </li>
+            ))}
+          </ul>
+          <a class="btn btn--ghost" href={url('/blog')}>All writing →</a>
+        </div>
+
+        <div class="split__col" data-reveal data-reveal-delay="120">
+          <p class="eyebrow">Bookshelf</p>
+          <h2 class="display split__title">What I’m reading</h2>
+          <p class="muted split__books-blurb">
+            A living shelf of the books shaping how I think — biology, ML, physics,
+            chemistry, and the occasional detour. Each with a few honest words.
+          </p>
+          <a class="btn btn--ghost" href={url('/bookshelf')}>Open the shelf →</a>
+        </div>
+      </div>
+    </section>
+
+    <!-- ================= CONTACT ================= -->
+    <section class="section contact">
+      <div class="wrap center">
+        <p class="eyebrow" data-reveal>Get in touch</p>
+        <h2 class="display contact__title" data-reveal>Let’s build something<br/>that matters.</h2>
+        <a class="btn btn--solid contact__btn" href={`mailto:${SITE.email}`} data-reveal>{SITE.email}</a>
+      </div>
+    </section>
+  </div>
 </Base>
 
 <style>
-  /* ---------- hero ---------- */
-  .hero { position: relative; min-height: 100svh; display: flex; align-items: center; overflow: hidden; }
-  .hero__canvas { z-index: 0; }
-  .hero__veil {
-    position: absolute; inset: 0; z-index: 1; pointer-events: none;
-    background:
-      radial-gradient(120% 90% at 50% 120%, var(--bg) 8%, transparent 60%),
-      linear-gradient(95deg, rgba(6,8,15,0.82) 0%, rgba(6,8,15,0.5) 32%, rgba(6,8,15,0.12) 55%, transparent 75%),
-      linear-gradient(180deg, rgba(6,8,15,0.5) 0%, transparent 24%, transparent 62%, var(--bg) 100%);
+  /* ---------- morphing background ---------- */
+  .bg-field { position: fixed; inset: 0; z-index: 0; }
+  .field-tag {
+    position: fixed; bottom: 1.5rem; left: var(--gut); z-index: 3;
+    display: flex; align-items: center; gap: 0.55rem;
+    font-size: 0.7rem; letter-spacing: 0.16em; text-transform: uppercase;
+    color: var(--ink-dim); pointer-events: none;
+    transition: opacity 0.6s var(--ease);
   }
-  .hero__content { position: relative; z-index: 2; padding-top: 8rem; padding-bottom: 6rem; }
+  .field-tag__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); transition: background 0.6s, box-shadow 0.6s; }
+  @media (max-width: 760px) { .field-tag { display: none; } }
+
+  /* ---------- hero ---------- */
+  .hero { position: relative; min-height: 100svh; display: flex; align-items: center; z-index: 1; }
+  .hero__veil {
+    position: absolute; inset: 0; z-index: 0; pointer-events: none;
+    background:
+      radial-gradient(120% 90% at 50% 120%, var(--bg) 6%, transparent 58%),
+      linear-gradient(95deg, rgba(6,8,15,0.8) 0%, rgba(6,8,15,0.42) 32%, rgba(6,8,15,0.08) 56%, transparent 76%),
+      linear-gradient(180deg, rgba(6,8,15,0.45) 0%, transparent 22%, transparent 70%, var(--bg) 100%);
+  }
+  .hero__content { position: relative; z-index: 2; padding-top: 7rem; padding-bottom: 6rem; }
   .hero__eyebrow { margin-bottom: 1.4rem; }
-  .hero__title { font-size: clamp(4.5rem, 17vw, 13rem); display: flex; flex-direction: column; }
+  .hero__title { font-size: clamp(4rem, 14vw, 12rem); display: flex; flex-direction: column; }
   .hero__line { display: block; }
   .hero__line--accent {
     background: linear-gradient(96deg, var(--blue), var(--cyan) 60%, var(--cyan-soft));
@@ -176,33 +186,44 @@ try {
     width: fit-content;
   }
   .hero__lede {
-    max-width: 40ch; margin-top: 1.8rem; font-size: clamp(1.1rem, 1rem + 0.7vw, 1.5rem);
+    max-width: 40ch; margin-top: 1.6rem; font-size: clamp(1.1rem, 1rem + 0.7vw, 1.5rem);
     line-height: 1.5; color: var(--ink-dim);
   }
   .hero__lede em { font-family: var(--display); font-style: italic; font-size: 1.12em; color: var(--cyan-soft); }
-  .hero__actions { display: flex; gap: 0.9rem; margin-top: 2.4rem; flex-wrap: wrap; }
-  .hero__socials { list-style: none; display: flex; gap: 1.4rem; margin-top: 2.6rem; padding: 0; flex-wrap: wrap; }
+  .hero__actions { display: flex; gap: 0.9rem; margin-top: 2.2rem; flex-wrap: wrap; }
+  .hero__socials { list-style: none; display: flex; gap: 1.4rem; margin-top: 2.4rem; padding: 0; flex-wrap: wrap; }
   .hero__socials a { font-family: var(--mono); font-size: 0.82rem; color: var(--ink-dim); transition: color 0.3s; }
   .hero__socials a:hover { color: var(--cyan); }
 
   .hero__scroll { position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; color: var(--ink-faint); }
-  .hero__scroll .mono { font-size: 0.66rem; letter-spacing: 0.3em; text-transform: uppercase; }
+  .hero__scroll .mono { font-size: 0.62rem; letter-spacing: 0.28em; text-transform: uppercase; }
   .hero__scroll-line { width: 1px; height: 46px; background: linear-gradient(var(--cyan), transparent); animation: scrollpulse 2.4s var(--ease-in-out) infinite; transform-origin: top; }
   @keyframes scrollpulse { 0%,100% { transform: scaleY(0.4); opacity: 0.4; } 50% { transform: scaleY(1); opacity: 1; } }
-
-  .hero__readout { position: absolute; bottom: 2rem; right: var(--gut); z-index: 2; display: flex; flex-direction: column; align-items: flex-end; gap: 0.3rem; font-size: 0.68rem; color: var(--ink-faint); letter-spacing: 0.06em; }
+  .hero__readout { position: absolute; bottom: 2rem; right: var(--gut); z-index: 2; font-size: 0.68rem; color: var(--ink-faint); letter-spacing: 0.06em; }
   @media (max-width: 760px) { .hero__readout, .hero__scroll { display: none; } }
 
-  /* entrance animation */
   [data-h] { opacity: 0; transform: translateY(26px); animation: heroIn 1s var(--ease) forwards; }
-  [data-h='0'] { animation-delay: 0.15s; }
-  [data-h='1'] { animation-delay: 0.3s; }
-  [data-h='2'] { animation-delay: 0.42s; }
-  [data-h='3'] { animation-delay: 0.62s; }
-  [data-h='4'] { animation-delay: 0.78s; }
-  [data-h='5'] { animation-delay: 0.92s; }
+  [data-h='0'] { animation-delay: 0.15s; } [data-h='1'] { animation-delay: 0.3s; }
+  [data-h='2'] { animation-delay: 0.42s; } [data-h='3'] { animation-delay: 0.62s; }
+  [data-h='4'] { animation-delay: 0.78s; } [data-h='5'] { animation-delay: 0.92s; }
   @keyframes heroIn { to { opacity: 1; transform: none; } }
   @media (prefers-reduced-motion: reduce) { [data-h] { opacity: 1; transform: none; animation: none; } }
+
+  /* ---------- page body: translucent so the morphing field glows through ---------- */
+  .page-body {
+    position: relative; z-index: 1;
+    background: linear-gradient(180deg, transparent 0, rgba(6,8,15,0.52) 5%, rgba(6,8,15,0.5) 100%);
+    backdrop-filter: blur(2px);
+  }
+  /* legibility over the live field */
+  .page-body .sec-title,
+  .page-body .now__text,
+  .page-body .wt__name,
+  .page-body .split__title,
+  .page-body .contact__title { text-shadow: 0 2px 30px rgba(6,8,15,0.9), 0 1px 8px rgba(6,8,15,0.8); }
+  .page-body .eyebrow,
+  .page-body .muted,
+  .page-body .post-list__title { text-shadow: 0 1px 12px rgba(6,8,15,0.9); }
 
   /* ---------- now ---------- */
   .now { padding-block: clamp(4rem, 9vh, 7rem); }
@@ -273,10 +294,22 @@ try {
 
 <script>
   import { mount } from '@/lib/three/core';
-  import { molecularNetwork } from '@/lib/three/MolecularNetwork';
+  import { morphField } from '@/lib/three/MorphField';
+  import * as THREE from 'three';
 
-  mount('#hero-scene', (h) => molecularNetwork(h), {
-    bloom: { strength: 0.85, radius: 0.6, threshold: 0.05 },
-    alpha: true,
-  });
+  const tag = document.getElementById('field-tag');
+  const label = document.getElementById('field-tag-label');
+  const dot = tag?.querySelector('.field-tag__dot') as HTMLElement | null;
+
+  mount('#bg-field', (h) =>
+    morphField(h, {
+      onStage: (_i, text, accent) => {
+        if (label) label.textContent = text;
+        if (dot) {
+          const c = '#' + new THREE.Color(accent).getHexString();
+          dot.style.background = c;
+          dot.style.boxShadow = `0 0 12px ${c}`;
+        }
+      },
+    }), { bloom: { strength: 0.9, radius: 0.6, threshold: 0.04 }, alpha: true });
 </script>

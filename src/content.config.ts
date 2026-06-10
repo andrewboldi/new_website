@@ -10,7 +10,10 @@ const blog = defineCollection({
     summary: z.string().optional(),
     draft: z.boolean().default(false),
     /** optional three.js scene to render at the top of the post */
-    scene: z.enum(['network', 'molecule', 'protein', 'density', 'landscape']).optional(),
+    scene: z.enum([
+      'network', 'molecule', 'protein', 'density', 'landscape',
+      'neuralnet', 'signal', 'orbital', 'helix', 'statmech', 'lattice',
+    ]).optional(),
   }),
 });
 

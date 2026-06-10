@@ -4,6 +4,12 @@ import PageHeader from '@/components/PageHeader.astro';
 import Scene from '@/components/Scene.astro';
 import { SITE, SOCIALS } from '@/lib/site';
 import { POLYMATH, COURSEWORK } from '@/lib/data';
+
+const courseScene: Record<string, string> = {
+  'Machine Learning & CS': 'neuralnet',
+  Chemistry: 'orbital',
+  'Biology & Physics': 'statmech',
+};
 ---
 
 <Base title="About" description="Andrew Boldi — chemical biologist, computer scientist, pianist, and incorrigible polymath.">
@@ -89,6 +95,7 @@ import { POLYMATH, COURSEWORK } from '@/lib/data';
       <div class="course__grid">
         {Object.entries(COURSEWORK).map(([area, items], i) => (
           <div class="course__col" data-reveal data-reveal-delay={i * 60}>
+            <div class="course__scene"><Scene name={(courseScene[area] ?? 'lattice') as any} /></div>
             <p class="course__area mono">{area}</p>
             <ul>{items.map((c) => <li>{c}</li>)}</ul>
           </div>
@@ -127,6 +134,7 @@ import { POLYMATH, COURSEWORK } from '@/lib/data';
 
   /* coursework */
   .course__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2rem; }
+  .course__scene { height: 150px; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
   .course__area { color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.08em; padding-bottom: 0.8rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
   .course__col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
   .course__col li { font-size: 0.92rem; color: var(--ink-dim); padding-left: 1rem; position: relative; }

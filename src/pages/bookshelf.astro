@@ -34,7 +34,12 @@ const stars = (r?: number) =>
   <!-- ===== 3D SHELF ===== -->
   <section class="shelf-wrap">
     <div class="wrap">
-      <div class="shelf-host scene-host" id="shelf"></div>
+      <div class="shelf-host scene-host" id="shelf">
+        <div class="shelf-cap" id="shelf-cap" aria-hidden="true">
+          <span class="shelf-cap__title display"></span>
+          <span class="shelf-cap__meta mono"></span>
+        </div>
+      </div>
       <div class="shelf-meta">
         <p class="shelf-hint mono faint">drag-free · hover + click the spines</p>
         <ul class="legend mono">
@@ -86,7 +91,18 @@ const stars = (r?: number) =>
 
 <style>
   .shelf-wrap { padding-top: 1rem; }
-  .shelf-host { width: 100%; height: clamp(360px, 56vh, 620px); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(120% 100% at 50% 0%, rgba(0,153,255,0.07), transparent 60%), linear-gradient(180deg, var(--surface), var(--bg-2)); }
+  .shelf-host { position: relative; width: 100%; height: clamp(360px, 56vh, 620px); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(120% 100% at 50% 0%, rgba(0,153,255,0.07), transparent 60%), linear-gradient(180deg, var(--surface), var(--bg-2)); }
+  .shelf-cap {
+    position: absolute; top: 1.2rem; left: 50%; transform: translateX(-50%) translateY(-8px);
+    z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
+    text-align: center; pointer-events: none; opacity: 0; transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
+    padding: 0.7rem 1.3rem; border-radius: 12px;
+    background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(8px);
+    border: 1px solid var(--line-2); max-width: min(90%, 480px);
+  }
+  .shelf-cap.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  .shelf-cap__title { font-size: 1.3rem; line-height: 1.05; color: var(--ink); }
+  .shelf-cap__meta { font-size: 0.7rem; letter-spacing: 0.06em; color: var(--cyan); text-transform: uppercase; }
   .shelf-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; gap: 1rem; flex-wrap: wrap; }
   .shelf-hint { font-size: 0.72rem; letter-spacing: 0.1em; }
   .legend { list-style: none; display: flex; gap: 1.4rem; margin: 0; padding: 0; font-size: 0.74rem; color: var(--ink-dim); }
@@ -127,6 +143,22 @@ const stars = (r?: number) =>
   if (books.length) {
     mount('#shelf', (h) => bookshelf3D(h, books), { bloom: { strength: 0.5, radius: 0.5, threshold: 0.2 } });
   }
+
+  // 3D hover -> crisp DOM caption
+  const cap = document.getElementById('shelf-cap');
+  const capTitle = cap?.querySelector('.shelf-cap__title') as HTMLElement | null;
+  const capMeta = cap?.querySelector('.shelf-cap__meta') as HTMLElement | null;
+  window.addEventListener('book:hover', (e) => {
+    const idx = (e as CustomEvent).detail as number;
+    if (idx >= 0 && books[idx] && cap) {
+      const b = books[idx];
+      if (capTitle) capTitle.textContent = b.title;
+      if (capMeta) capMeta.textContent = `${b.author} · ${b.status}${b.rating ? ` · ${b.rating}★` : ''}`;
+      cap.classList.add('show');
+    } else {
+      cap?.classList.remove('show');
+    }
+  });
 
   // 3D selection -> highlight + scroll the matching card
   const cards = Array.from(document.querySelectorAll<HTMLElement>('.book'));

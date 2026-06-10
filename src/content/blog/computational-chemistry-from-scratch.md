@@ -3,7 +3,7 @@ title: 'Computational Chemistry from Scratch'
 date: 2025-02-24
 tags: ['Computational Chemistry', 'Physics', 'Chemistry']
 summary: 'Building up the approximations behind computational chemistry with no prerequisites beyond precalculus, high-school calculus, and curiosity. Part one of a series.'
-scene: 'density'
+scene: 'orbital'
 ---
 
 So you want to learn computational chemistry but haven't taken quantum mechanics,
