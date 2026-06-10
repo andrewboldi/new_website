@@ -1,0 +1,52 @@
+---
+import { SITE, SOCIALS, NAV, url } from '@/lib/site';
+const year = new Date().getFullYear();
+---
+
+<footer class="foot">
+  <div class="wrap foot__grid">
+    <div class="foot__brand">
+      <p class="display foot__name">{SITE.name}</p>
+      <p class="muted foot__tag">{SITE.tagline}</p>
+      <p class="mono foot__loc">◎ {SITE.location}</p>
+    </div>
+
+    <nav class="foot__col" aria-label="Pages">
+      <p class="eyebrow">Pages</p>
+      {NAV.map((i) => <a href={url(i.path)}>{i.label}</a>)}
+    </nav>
+
+    <nav class="foot__col" aria-label="Elsewhere">
+      <p class="eyebrow">Elsewhere</p>
+      {SOCIALS.map((s) => (
+        <a href={s.href} target="_blank" rel="noopener noreferrer">
+          {s.label} <span class="faint">/ {s.handle}</span>
+        </a>
+      ))}
+      <a href={`mailto:${SITE.email}`}>Email <span class="faint">/ say hello</span></a>
+    </nav>
+  </div>
+
+  <div class="wrap foot__base">
+    <span class="mono">© {year} — built with three.js & a lot of curiosity</span>
+    <span class="mono foot__sig">lat 37.51°N · lng 122.26°W</span>
+  </div>
+</footer>
+
+<style>
+  .foot { border-top: 1px solid var(--line); margin-top: 4rem; padding-block: 4rem 2rem; background: linear-gradient(180deg, transparent, var(--bg-2)); }
+  .foot__grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 2.5rem; }
+  .foot__name { font-size: clamp(2rem, 6vw, 3rem); }
+  .foot__tag { max-width: 30ch; margin-top: 0.4rem; }
+  .foot__loc { margin-top: 1rem; font-size: 0.78rem; color: var(--cyan); letter-spacing: 0.08em; }
+  .foot__col { display: flex; flex-direction: column; gap: 0.7rem; }
+  .foot__col .eyebrow { margin-bottom: 0.5rem; }
+  .foot__col a { color: var(--ink-dim); transition: color 0.3s, transform 0.3s var(--ease); width: fit-content; }
+  .foot__col a:hover { color: var(--cyan); transform: translateX(4px); }
+  .foot__base { display: flex; justify-content: space-between; align-items: center; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 0.72rem; }
+  @media (max-width: 760px) {
+    .foot__grid { grid-template-columns: 1fr 1fr; }
+    .foot__brand { grid-column: 1 / -1; }
+    .foot__base { flex-direction: column; gap: 0.6rem; text-align: center; }
+  }
+</style>

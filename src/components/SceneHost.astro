@@ -1,0 +1,30 @@
+---
+/**
+ * Visual host for a three.js scene. Renders a positioned div the scene mounts
+ * into, plus an optional static poster shown until/instead of the canvas
+ * (reduced-motion friendly). Scenes are mounted from a page-level <script>.
+ */
+interface Props {
+  id: string;
+  class?: string;
+  /** aria description of the visualization */
+  label?: string;
+}
+const { id, class: klass = '', label } = Astro.props;
+---
+
+<div class={`scene-host ${klass}`} id={id} role="img" aria-label={label}>
+  <noscript>
+    <div class="scene-host__fallback" aria-hidden="true"></div>
+  </noscript>
+</div>
+
+<style>
+  .scene-host { overflow: hidden; }
+  .scene-host__fallback {
+    position: absolute; inset: 0;
+    background:
+      radial-gradient(50% 60% at 50% 40%, rgba(0,153,255,0.18), transparent 70%),
+      radial-gradient(40% 50% at 70% 70%, rgba(56,232,200,0.14), transparent 70%);
+  }
+</style>
