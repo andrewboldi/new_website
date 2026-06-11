@@ -68,102 +68,126 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
     </div>
   </section>
 
-  <!-- ===== PROJECTS ===== -->
-  <section class="section projects">
-    <div class="wrap">
-      <h2 class="sec-title display" data-reveal>Selected projects</h2>
+  <!-- ===== PROJECTS — pinned horizontal-scroll gallery ===== -->
+  <!--
+    Outer section is tall (height set in JS = track travel + one viewport) to
+    provide vertical scroll length. The sticky child locks to the viewport while
+    vertical scroll is mapped onto the track's horizontal translateX.
+    Under prefers-reduced-motion the pin is skipped and the track renders as the
+    normal responsive grid (see the @media block in <style>).
+  -->
+  <section class="section projects hscroll" id="projGallery" data-hscroll>
+    <div class="hscroll__sticky" data-hscroll-sticky>
+      <!-- sticky header: title + stats + filter chips travel with the pin -->
+      <header class="hscroll__head wrap">
+        <div class="hscroll__headrow">
+          <h2 class="sec-title display hscroll__title">Selected projects</h2>
+          <div class="projstats mono">
+            <span class="projstats__item"><b>{PROJECTS.length}</b> projects</span>
+            <span class="projstats__sep" aria-hidden="true">·</span>
+            <span class="projstats__item"><b>{PROJECT_CATEGORIES.length}</b> fields</span>
+            <span class="projstats__sep" aria-hidden="true">·</span>
+            <span class="projstats__item"><b>{liveCount}</b> with source / live links</span>
+          </div>
+        </div>
+        <div class="filters" role="group" aria-label="Filter projects by category">
+          <button type="button" class="chip chip--on" data-filter="all" aria-pressed="true">All</button>
+          {PROJECT_CATEGORIES.map((c) => (
+            <button type="button" class="chip" data-filter={c} aria-pressed="false">{c}</button>
+          ))}
+        </div>
+        <p class="hscroll__hint mono" aria-hidden="true">scroll to glide sideways →</p>
+      </header>
 
-      <!-- summary stats -->
-      <div class="projstats mono" data-reveal>
-        <span class="projstats__item"><b>{PROJECTS.length}</b> projects</span>
-        <span class="projstats__sep" aria-hidden="true">·</span>
-        <span class="projstats__item"><b>{PROJECT_CATEGORIES.length}</b> fields</span>
-        <span class="projstats__sep" aria-hidden="true">·</span>
-        <span class="projstats__item"><b>{liveCount}</b> with source / live links</span>
-      </div>
+      <!-- horizontally clipped viewport + transformed track -->
+      <div class="hscroll__viewport" data-hscroll-viewport>
+        <div class="hscroll__track" id="projGrid" aria-live="polite" data-hscroll-track>
+          {ordered.map((p, i) => (
+            <article
+              class={`card ticks proj ${p.featured ? 'proj--feat' : ''}`}
+              data-cat={p.category}
+              data-cardfx={p.anim ?? 'notegraph'}
+              data-cardfx-seed={i + 1}
+              tabindex="0"
+              aria-label={`${p.name} — ${p.category}${p.metric ? `. ${p.metric}` : ''}`}
+            >
+              <canvas class="cardfx-canvas" aria-hidden="true"></canvas>
+              <div class="proj__inner">
+                <div class="proj__top">
+                  <h3 class="proj__name"><span class="proj__name-line">{p.name}</span></h3>
+                  <div class="proj__badges">
+                    {p.featured && <span class="tag tag--accent">★ Featured</span>}
+                    <span class="proj__cat mono">{p.category}</span>
+                  </div>
+                </div>
 
-      <!-- category filter chips -->
-      <div class="filters" role="group" aria-label="Filter projects by category" data-reveal>
-        <button type="button" class="chip chip--on" data-filter="all" aria-pressed="true">All</button>
-        {PROJECT_CATEGORIES.map((c) => (
-          <button type="button" class="chip" data-filter={c} aria-pressed="false">{c}</button>
-        ))}
-      </div>
+                <p class="proj__blurb muted">{p.blurb}</p>
 
-      <div class="projects__grid" id="projGrid" aria-live="polite">
-        {ordered.map((p, i) => (
-          <article
-            class={`card ticks proj ${p.featured ? 'proj--feat' : ''}`}
-            data-reveal
-            data-reveal-delay={(i % 3) * 60}
-            data-cat={p.category}
-            data-cardfx={p.anim ?? 'notegraph'}
-            data-cardfx-seed={i + 1}
-            tabindex="0"
-            aria-label={`${p.name} — ${p.category}${p.metric ? `. ${p.metric}` : ''}`}
-          >
-            <canvas class="cardfx-canvas" aria-hidden="true"></canvas>
-            <div class="proj__inner">
-              <div class="proj__top">
-                <h3 class="proj__name">{p.name}</h3>
-                <div class="proj__badges">
-                  {p.featured && <span class="tag tag--accent">★ Featured</span>}
-                  <span class="proj__cat mono">{p.category}</span>
+                {p.metric && (
+                  <p class="proj__metric mono" aria-hidden="true">
+                    <span class="proj__metric-mark">▸</span>{p.metric}
+                  </p>
+                )}
+
+                <div class="proj__foot">
+                  <div class="proj__tags">
+                    {p.lang && <span class="tag tag--lang">{p.lang}</span>}
+                    {p.tags.map((t) => <span class="tag">{t}</span>)}
+                  </div>
+                  <div class="proj__links">
+                    {typeof p.stars === 'number' && (
+                      <span class="proj__stars mono" title={`${p.stars} GitHub stars`}>
+                        ★ {p.stars}
+                      </span>
+                    )}
+                    {p.link && (
+                      <a class="proj__link mono" href={p.link.href} target="_blank" rel="noopener noreferrer">
+                        {p.link.href.includes('github.com') ? 'Source' : p.link.label} ↗
+                      </a>
+                    )}
+                    {p.live && (
+                      <a class="proj__link proj__link--live mono" href={p.live.href} target="_blank" rel="noopener noreferrer">
+                        Live ↗
+                      </a>
+                    )}
+                  </div>
                 </div>
               </div>
-
-              <p class="proj__blurb muted">{p.blurb}</p>
-
-              {p.metric && (
-                <p class="proj__metric mono" aria-hidden="true">
-                  <span class="proj__metric-mark">▸</span>{p.metric}
-                </p>
-              )}
-
-              <div class="proj__foot">
-                <div class="proj__tags">
-                  {p.lang && <span class="tag tag--lang">{p.lang}</span>}
-                  {p.tags.map((t) => <span class="tag">{t}</span>)}
-                </div>
-                <div class="proj__links">
-                  {typeof p.stars === 'number' && (
-                    <span class="proj__stars mono" title={`${p.stars} GitHub stars`}>
-                      ★ {p.stars}
-                    </span>
-                  )}
-                  {p.link && (
-                    <a class="proj__link mono" href={p.link.href} target="_blank" rel="noopener noreferrer">
-                      {p.link.href.includes('github.com') ? 'Source' : p.link.label} ↗
-                    </a>
-                  )}
-                  {p.live && (
-                    <a class="proj__link proj__link--live mono" href={p.live.href} target="_blank" rel="noopener noreferrer">
-                      Live ↗
-                    </a>
-                  )}
-                </div>
-              </div>
-            </div>
-          </article>
-        ))}
+            </article>
+          ))}
+        </div>
+        <p class="projects__empty mono" id="projEmpty" hidden>No projects in this category.</p>
       </div>
 
-      <p class="projects__empty mono" id="projEmpty" hidden>No projects in this category.</p>
+      <!-- progress rail: current / total + scrub bar -->
+      <div class="hscroll__rail wrap" aria-hidden="true">
+        <span class="hscroll__index mono"><b data-rail-index>01</b> / <span data-rail-total>{ordered.length.toString().padStart(2, '0')}</span></span>
+        <span class="hscroll__bar"><span class="hscroll__barfill" data-rail-fill></span></span>
+      </div>
     </div>
   </section>
   </div>
 
   <script>
     import { startCardFx } from '@/lib/cardfx/engine';
+    import { startWorkHScroll } from '@/scripts/work-hscroll';
 
     // ---- per-project Canvas2D background animations ----
     // One shared rAF loop drives every card's <canvas>; offscreen / filtered-out
     // cards are skipped, fps is capped, and prefers-reduced-motion is honored.
     startCardFx(document);
 
+    // ---- pinned horizontal-scroll gallery ----
+    // Maps vertical scroll -> horizontal track translateX with inertial LERP,
+    // velocity skew/streak, per-card centre-cross reveal, and a progress rail.
+    // Returns null (no-op) under prefers-reduced-motion -> the grid fallback wins.
+    const hscroll = startWorkHScroll(document);
+
     // ---- category filter chips ----
     // We toggle a `.proj--out` class instead of removing nodes, so the
-    // scroll-reveal state set by the global IntersectionObserver is preserved.
+    // scroll-reveal/focus state is preserved. After filtering we fire a
+    // `work:filter` event so the horizontal controller re-measures track width.
+    const gallery = document.getElementById('projGallery');
     const grid = document.getElementById('projGrid');
     const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('.chip'));
     const empty = document.getElementById('projEmpty');
@@ -177,6 +201,13 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
         if (match) shown++;
       });
       if (empty) empty.hidden = shown !== 0;
+      // re-measure horizontal track (no-op if reduced-motion fallback is active)
+      gallery?.dispatchEvent(new CustomEvent('work:filter'));
+      // also snap the page back to the gallery top so the user sees the new set
+      if (hscroll && gallery) {
+        const top = gallery.getBoundingClientRect().top + window.scrollY;
+        if (window.scrollY > top) window.scrollTo({ top, behavior: 'smooth' });
+      }
     }
 
     chips.forEach((chip) => {
@@ -244,56 +275,135 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
   .chip--on:hover { color: #021018; }
   .chip:focus-visible { outline: 2px solid var(--cyan-soft); outline-offset: 3px; }
 
-  .projects__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
   .projects__empty { color: var(--ink-faint); letter-spacing: 0.1em; padding: 2rem 0; }
 
-  .proj { position: relative; display: flex; flex-direction: column; min-height: 240px; overflow: hidden; }
+  /* ============================================================
+     PINNED HORIZONTAL-SCROLL GALLERY
+     The .hscroll section is tall (height set by JS). Its sticky
+     child locks to the viewport; the track translates in X.
+     ============================================================ */
+  .hscroll { position: relative; padding: 0; margin-top: 1rem; }
+  .hscroll__sticky {
+    position: sticky; top: 0; height: 100svh;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  /* a faint moving scrim that streaks when you flick (velocity-reactive) */
+  .hscroll__sticky::after {
+    content: ''; position: absolute; inset: 0; z-index: 3; pointer-events: none;
+    background: linear-gradient(90deg, rgba(56,232,200,0.05), transparent 18%, transparent 82%, rgba(0,153,255,0.05));
+    opacity: calc(var(--vel, 0) * 1.6);
+    transition: opacity 0.5s var(--ease);
+  }
+
+  .hscroll__head { padding-top: clamp(1.6rem, 5vh, 3rem); flex-shrink: 0; }
+  .hscroll__headrow { display: flex; align-items: baseline; gap: 1.2rem; flex-wrap: wrap; }
+  .hscroll__title { margin-bottom: 0; }
+  .hscroll .projstats { margin: 0; }
+  .hscroll .filters { margin: 1rem 0 0.4rem; }
+  .hscroll__hint {
+    font-size: 0.66rem; letter-spacing: 0.18em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0.4rem 0 0;
+    animation: hintpulse 3.2s var(--ease-in-out) infinite;
+  }
+  @keyframes hintpulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.85; } }
+
+  /* horizontally-clipped viewport holds the flex track, vertically centred */
+  .hscroll__viewport {
+    position: relative; flex: 1; min-height: 0;
+    display: flex; align-items: center; overflow: hidden;
+  }
+  .hscroll__track {
+    display: flex; align-items: stretch; gap: 1.6rem;
+    /* leading/trailing padding so first card starts in from the edge and the
+       last card can reach centre before the section releases */
+    padding: 0 max(8vw, 2rem) 0 max(4vw, 1.2rem);
+    will-change: transform;
+    transform: translate3d(0,0,0);
+  }
+
+  .hscroll .projects__empty { padding: 0 max(4vw, 1.2rem); }
+
+  /* progress rail */
+  .hscroll__rail {
+    flex-shrink: 0; display: flex; align-items: center; gap: 1rem;
+    padding-bottom: clamp(1.4rem, 4vh, 2.4rem); padding-top: 0.4rem;
+  }
+  .hscroll__index { font-size: 0.74rem; letter-spacing: 0.12em; color: var(--ink-dim); flex-shrink: 0; }
+  .hscroll__index b { color: var(--cyan); font-weight: 600; }
+  .hscroll__bar { position: relative; flex: 1; height: 2px; background: var(--line); border-radius: 2px; overflow: hidden; }
+  .hscroll__barfill {
+    position: absolute; inset: 0; transform-origin: left center; transform: scaleX(0);
+    background: linear-gradient(90deg, var(--blue), var(--cyan));
+    box-shadow: var(--glow-cyan);
+  }
+
+  /* ---- the cards (horizontal track variant) ---- */
+  .hscroll .proj {
+    position: relative; display: flex; flex-direction: column;
+    flex: 0 0 clamp(300px, 30vw, 420px);
+    height: min(64vh, 520px); overflow: hidden;
+    opacity: 0.5; filter: saturate(0.7);
+    transition: opacity 0.7s var(--ease), filter 0.7s var(--ease), transform 0.7s var(--ease), border-color 0.5s var(--ease);
+  }
   .proj__inner { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; }
   .proj--feat { border-color: rgba(56,232,200,0.22); }
 
-  /* per-project Canvas2D animation washing behind the card, brightening on hover.
-     Masked to fade toward the top so the title/blurb stay legible. */
+  /* the focused card (centre crossed mid-viewport) comes forward and sharpens */
+  .hscroll .proj.is-focused {
+    opacity: 1; filter: saturate(1);
+    border-color: rgba(56,232,200,0.3);
+    transform: translateY(-6px) scale(1.012);
+  }
+
+  /* per-project Canvas2D animation washing behind the card.
+     Off-focus it sits blurred + dim (microscope out of focus); when the card
+     reaches centre it "focuses" — blur->0, opacity up. Masked at the top so the
+     title/blurb stay legible. */
   .cardfx-canvas {
     position: absolute; inset: 0; z-index: 0;
     width: 100%; height: 100%;
-    opacity: 0.22; pointer-events: none;
-    transition: opacity 0.6s var(--ease);
+    opacity: 0.12; pointer-events: none;
+    filter: blur(10px);
+    transition: opacity 0.8s var(--ease), filter 0.8s var(--ease);
     -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.35), #000 55%);
     mask-image: linear-gradient(180deg, rgba(0,0,0,0.35), #000 55%);
   }
-  .proj:hover .cardfx-canvas, .proj:focus-within .cardfx-canvas { opacity: 0.34; }
-  .proj--feat .cardfx-canvas { opacity: 0.26; }
-  .proj--feat:hover .cardfx-canvas, .proj--feat:focus-within .cardfx-canvas { opacity: 0.38; }
-  @media (prefers-reduced-motion: reduce) {
-    .cardfx-canvas { opacity: 0.18; }
-  }
+  .hscroll .proj.is-focused .cardfx-canvas { opacity: 0.3; filter: blur(0px); }
+  .hscroll .proj.is-focused.proj--feat .cardfx-canvas { opacity: 0.34; }
+  .proj:hover .cardfx-canvas, .proj:focus-within .cardfx-canvas { opacity: 0.36; filter: blur(0px); }
 
-  /* filtered-out cards collapse smoothly */
+  /* filtered-out cards collapse */
   .proj--out { display: none; }
 
   .proj__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
-  .proj__name { font-size: 1.4rem; font-family: var(--display); }
+  /* title mask-wipe: the line sits below an overflow edge and rises on focus */
+  .proj__name { font-size: 1.5rem; font-family: var(--display); overflow: hidden; line-height: 1.08; }
+  .proj__name-line {
+    display: inline-block; transform: translateY(108%);
+    transition: transform 0.8s var(--ease);
+  }
+  .hscroll .proj.is-focused .proj__name-line { transform: translateY(0); }
   .proj__badges { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; flex-shrink: 0; }
   .proj__cat { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
-  .proj__blurb { margin-top: 0.8rem; font-size: 0.95rem; flex: 1; }
 
-  /* hover-reveal metric: collapsed by default, springs open on hover/focus */
-  .proj__metric {
-    display: grid; grid-template-rows: 0fr;
-    margin-top: 0; color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.02em;
-    opacity: 0; transition: grid-template-rows 0.5s var(--ease), opacity 0.4s var(--ease), margin-top 0.5s var(--ease);
+  /* blurb + metric + tags stagger in once the card is focused */
+  .proj__blurb, .hscroll .proj__metric, .hscroll .proj__foot {
+    opacity: 0; transform: translateY(14px);
+    transition: opacity 0.6s var(--ease), transform 0.6s var(--ease);
   }
-  .proj__metric > * { overflow: hidden; min-height: 0; }
+  .proj__blurb { margin-top: 0.8rem; font-size: 0.95rem; flex: 0 0 auto; }
+  .hscroll .proj.is-focused .proj__blurb { opacity: 1; transform: none; transition-delay: 0.12s; }
+  .hscroll .proj.is-focused .proj__metric { opacity: 1; transform: none; transition-delay: 0.2s; }
+  .hscroll .proj.is-focused .proj__foot { opacity: 1; transform: none; transition-delay: 0.28s; }
+
+  /* metric is always laid out in the horizontal gallery (revealed via stagger) */
+  .hscroll .proj__metric {
+    margin-top: 0.85rem; color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.02em;
+  }
   .proj__metric-mark { color: var(--cyan-soft); margin-right: 0.45em; }
-  .proj:hover .proj__metric, .proj:focus-within .proj__metric, .proj:focus .proj__metric {
-    grid-template-rows: 1fr; opacity: 1; margin-top: 0.85rem;
-  }
-  /* always show the metric on touch devices, where there is no hover */
-  @media (hover: none) {
-    .proj__metric { grid-template-rows: 1fr; opacity: 1; margin-top: 0.85rem; }
-  }
 
-  .proj__foot { margin-top: 1.2rem; }
+  .proj__foot { margin-top: auto; padding-top: 1rem; }
   .proj__tags { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
   .tag--lang { color: var(--blue-soft); border-color: rgba(0,153,255,0.3); }
   .proj__links { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
@@ -303,11 +413,68 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
   .proj__link--live { color: var(--cyan); }
   .proj__link--live:hover { color: var(--cyan-soft); }
 
-  /* accessible focus for keyboard users */
+  /* accessible focus for keyboard users — also force the card into focus state */
   .proj:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-color: var(--cyan); }
+  .hscroll .proj:focus-within, .hscroll .proj:focus-visible {
+    opacity: 1; filter: saturate(1);
+  }
+  .hscroll .proj:focus-within .proj__name-line { transform: translateY(0); }
+  .hscroll .proj:focus-within .proj__blurb,
+  .hscroll .proj:focus-within .proj__metric,
+  .hscroll .proj:focus-within .proj__foot { opacity: 1; transform: none; }
 
   @media (max-width: 760px) {
     .xp__item { grid-template-columns: 1fr; }
     .xp__rail { display: none; }
+  }
+
+  /* ============================================================
+     REDUCED-MOTION / FALLBACK — no pin, no horizontal hijack.
+     Render the track as a normal responsive vertical grid; all the
+     reveal/blur/wipe transforms reset so everything is visible.
+     ============================================================ */
+  @media (prefers-reduced-motion: reduce) {
+    .hscroll { padding: var(--section-pad, 4rem) 0; }
+    .hscroll__sticky { position: static; height: auto; overflow: visible; display: block; }
+    .hscroll__sticky::after { display: none; }
+    .hscroll__head { padding-top: 0; }
+    .hscroll__viewport { display: block; overflow: visible; }
+    .hscroll__track {
+      display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1rem; padding: 0; transform: none !important;
+    }
+    .hscroll .proj {
+      flex: initial; height: auto; min-height: 240px;
+      opacity: 1; filter: none; transform: none;
+    }
+    .proj__name { overflow: visible; }
+    .proj__name-line { transform: none !important; }
+    .cardfx-canvas { opacity: 0.18; filter: none; }
+    .proj__blurb, .hscroll .proj__metric, .hscroll .proj__foot {
+      opacity: 1; transform: none;
+    }
+    .proj__foot { margin-top: 1.2rem; }
+    .hscroll__rail { display: none; }
+    .hscroll__hint { display: none; }
+  }
+
+  /* very small screens: also drop the horizontal hijack regardless of motion pref,
+     since a 100svh sideways reel is awkward on phones */
+  @media (max-width: 560px) and (prefers-reduced-motion: no-preference) {
+    .hscroll__sticky { position: static; height: auto; overflow: visible; }
+    .hscroll__sticky::after { display: none; }
+    .hscroll__viewport { overflow: visible; }
+    .hscroll__track {
+      display: flex; flex-direction: column; padding: 0;
+      transform: none !important;
+    }
+    .hscroll .proj {
+      flex: initial; height: auto; min-height: 240px;
+      opacity: 1; filter: none; transform: none;
+    }
+    .proj__name-line { transform: none !important; }
+    .cardfx-canvas { opacity: 0.18; filter: none; }
+    .proj__blurb, .hscroll .proj__metric, .hscroll .proj__foot { opacity: 1; transform: none; }
+    .hscroll__rail { display: none; }
   }
 </style>
