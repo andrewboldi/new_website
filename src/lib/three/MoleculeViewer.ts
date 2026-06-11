@@ -31,8 +31,13 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
 
   camera.position.set(0, 0, 26);
 
-  // env so the spheres get real specular reflections — a cheap gradient
-  // CanvasTexture (no heavy PMREM prefilter, which can stall software-GL).
+  // Environment for real specular reflections on the clearcoat/iridescent
+  // atoms. We start from a cheap on-brand gradient CanvasTexture, then try to
+  // PMREM-prefilter a tiny emissive "studio" so roughness maps to mip blur and
+  // the glossy coat picks up soft colored highlights (cool key, blue fill, a
+  // faint amber rim) instead of a flat smear. environmentIntensity is kept LOW
+  // so the dark mood survives. PMREM is a one-time init cost (free per frame);
+  // if it throws on software-GL we silently keep the raw gradient.
   const envCanvas = document.createElement('canvas');
   envCanvas.width = 4; envCanvas.height = 64;
   const ectx = envCanvas.getContext('2d')!;
@@ -46,21 +51,66 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
   const env = new THREE.CanvasTexture(envCanvas);
   env.mapping = THREE.EquirectangularReflectionMapping;
   env.colorSpace = THREE.SRGBColorSpace;
-  scene.environment = env;
 
-  scene.add(new THREE.AmbientLight(0x99bbff, 0.55));
-  const key = new THREE.DirectionalLight(0xffffff, 2.4);
+  let envTexture: THREE.Texture = env;
+  let pmremRT: THREE.WebGLRenderTarget | null = null;
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    // tiny palette studio: a few emissive planes in the brand colors. Rendered
+    // once into a PMREM cube, then disposed. Gives on-brand colored reflections
+    // without any HDR download.
+    const envScene = new THREE.Scene();
+    const panel = (color: number, intensity: number, pos: [number, number, number], s: number) => {
+      const m = new THREE.Mesh(
+        new THREE.PlaneGeometry(s, s),
+        new THREE.MeshBasicMaterial({ color, transparent: true, opacity: intensity }),
+      );
+      m.position.set(...pos);
+      m.lookAt(0, 0, 0);
+      envScene.add(m);
+    };
+    envScene.add(new THREE.Mesh(
+      new THREE.SphereGeometry(50, 16, 16),
+      new THREE.MeshBasicMaterial({ color: 0x070b14, side: THREE.BackSide }),
+    ));
+    panel(0xbcd6ee, 0.95, [6, 9, 8], 22);   // cool key
+    panel(PALETTE.blue, 0.55, [-9, 2, 6], 18);  // blue fill
+    panel(PALETTE.cyan, 0.4, [-3, -7, -8], 14); // cyan under-bounce
+    panel(PALETTE.amber, 0.22, [8, 1, -9], 10); // faint amber rim
+    pmremRT = pmrem.fromScene(envScene, 0.04);
+    envTexture = pmremRT.texture;
+    envScene.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (mesh.geometry) mesh.geometry.dispose();
+      const mat = mesh.material as THREE.Material | undefined;
+      if (mat) mat.dispose();
+    });
+    pmrem.dispose();
+  } catch {
+    envTexture = env; // software-GL fallback: raw gradient still lights PBR
+  }
+  scene.environment = envTexture;
+  // keep IBL subtle so the scene stays dark/scientific, not studio-bright
+  scene.environmentIntensity = 0.62;
+
+  // Three-point-ish rig. The PMREM env now supplies soft IBL fill + the
+  // reflections the clearcoat/iridescence need, so the raw key is eased a touch
+  // (2.4 -> 2.0) to keep the lacquer highlight crisp without driving pixels to
+  // white (bloom threshold is 0.45). Ambient is lowered for the same reason —
+  // the env carries the ambient now.
+  scene.add(new THREE.AmbientLight(0x99bbff, 0.4));
+  const key = new THREE.DirectionalLight(0xffffff, 2.0);
   key.position.set(6, 8, 10);
   scene.add(key);
-  const rim = new THREE.PointLight(PALETTE.cyan, 90, 140, 2);
+  const rim = new THREE.PointLight(PALETTE.cyan, 85, 140, 2);
   rim.position.set(-9, -4, 7);
   scene.add(rim);
-  const fill = new THREE.PointLight(PALETTE.blue, 55, 140, 2);
+  const fill = new THREE.PointLight(PALETTE.blue, 50, 140, 2);
   fill.position.set(9, 3, -9);
   scene.add(fill);
-  // a back rim to pop the silhouette
-  const back = new THREE.DirectionalLight(0xbfe0ff, 1.0);
-  back.position.set(-4, 2, -10);
+  // a tighter back rim to pop the silhouette against the dark interlude bg
+  const back = new THREE.DirectionalLight(0xbfe0ff, 1.25);
+  back.position.set(-4, 2, -11);
   scene.add(back);
 
   const controls = new OrbitControls(camera, renderer.domElement);
@@ -102,8 +152,14 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
     fragmentShader: /* glsl */ `
       varying vec3 vN; varying vec3 vView; uniform vec3 uColor; uniform float uPulse;
       void main() {
-        float f = pow(1.0 - max(0.0, dot(normalize(vN), normalize(vView))), 2.4);
-        gl_FragColor = vec4(uColor, f * 0.5 * uPulse);
+        float ndv = max(0.0, dot(normalize(vN), normalize(vView)));
+        // crisp fresnel rim for silhouette pop (thin, bright edge) ...
+        float rim = pow(1.0 - ndv, 3.4);
+        // ... plus a soft broad shell so it still reads as an electron cloud.
+        float cloud = pow(1.0 - ndv, 1.7) * 0.32;
+        float f = rim + cloud;
+        // capped so it stays a halo, never a blown-out blob (bloom threshold 0.45)
+        gl_FragColor = vec4(uColor, min(0.62, f * 0.5 * uPulse));
       }`,
   });
   disposables.push(haloMat);
@@ -138,9 +194,17 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
         el === 'O' ? 0.56 : el === 'S' ? 0.78 : el === 'P' ? 0.8 : 0.6;
 
       // ---- instanced atoms ----
+      // Premium PBR: a glossy lacquered clearcoat over the CPK base, plus a
+      // whisper of iridescence so the specular highlights pick up a soap-film
+      // color shift (on-brand "molecular/optical" flourish). Both are cheap
+      // shader additions — no transmission (would cost a back-buffer per frame
+      // and risks blowing out a dark scene).
       const atomMat = new THREE.MeshPhysicalMaterial({
-        vertexColors: false, color: 0xffffff, roughness: 0.28, metalness: 0.0,
-        clearcoat: 0.6, clearcoatRoughness: 0.25, envMapIntensity: 1.3,
+        vertexColors: false, color: 0xffffff, roughness: 0.22, metalness: 0.0,
+        clearcoat: 1.0, clearcoatRoughness: 0.1,
+        iridescence: 0.32, iridescenceIOR: 1.32,
+        iridescenceThicknessRange: [120, 380],
+        envMapIntensity: 1.15,
         emissiveIntensity: 0.0,
       });
       disposables.push(atomMat);
@@ -201,9 +265,14 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
       for (const bd of rawBonds) rodCount += bd.len < doubleThresh ? 2 : 1;
 
       const bondMat = new THREE.MeshPhysicalMaterial({
-        color: 0xcdd9f2, roughness: 0.45, metalness: 0.15,
-        clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 1.0,
-        emissive: 0x0a1626, emissiveIntensity: 0.5,
+        color: 0xcdd9f2, roughness: 0.32, metalness: 0.15,
+        clearcoat: 0.9, clearcoatRoughness: 0.16,
+        iridescence: 0.18, iridescenceIOR: 1.3,
+        iridescenceThicknessRange: [140, 360],
+        envMapIntensity: 1.0,
+        // keep emissive low: bloom threshold is 0.45, so this must not push the
+        // rods over the cutoff and wash the silhouette to white.
+        emissive: 0x0a1626, emissiveIntensity: 0.35,
       });
       disposables.push(bondMat);
       const bonds = new THREE.InstancedMesh(bondGeo, bondMat, rodCount);
@@ -262,5 +331,6 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
     controls.dispose();
     for (const d of disposables) { try { d.dispose(); } catch { /* noop */ } }
     env.dispose();
+    if (pmremRT) { try { pmremRT.dispose(); } catch { /* noop */ } }
   });
 }
