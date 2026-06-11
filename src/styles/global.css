@@ -201,7 +201,9 @@ p a:hover, .prose a:hover { background-size: 100% 1px; color: var(--cyan-soft); 
 .abs-fill { position: absolute; inset: 0; }
 
 /* ---------- morphing background (shared across pages) ---------- */
-.bg-field { position: fixed; inset: 0; z-index: 0; }
+/* pointer-events:none so it never intercepts clicks (its parallax reads the
+   global pointermove, not canvas events); dialed back to sit behind content. */
+.bg-field { position: fixed; inset: 0; z-index: 0; pointer-events: none; opacity: 0.5; filter: blur(1px); }
 .field-tag {
   position: fixed; bottom: 1.5rem; left: var(--gut); z-index: 3;
   display: flex; align-items: center; gap: 0.55rem;

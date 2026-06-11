@@ -177,8 +177,10 @@ try {
   .hero__lede em { font-family: var(--display); font-style: italic; font-size: 1.12em; color: var(--cyan-soft); }
   .hero__actions { display: flex; gap: 0.9rem; margin-top: 2.2rem; flex-wrap: wrap; }
   .hero__socials { list-style: none; display: flex; gap: 1.4rem; margin-top: 2.4rem; padding: 0; flex-wrap: wrap; }
-  .hero__socials a { font-family: var(--mono); font-size: 0.82rem; color: var(--ink-dim); transition: color 0.3s; }
+  .hero__socials a { position: relative; font-family: var(--mono); font-size: 0.82rem; color: var(--ink-dim); transition: color 0.3s; }
+  .hero__socials a::after { content: ''; position: absolute; left: 0; bottom: -4px; height: 1px; width: 100%; background: linear-gradient(90deg, var(--cyan), var(--blue)); transform: scaleX(0); transform-origin: left; transition: transform 0.45s var(--ease); }
   .hero__socials a:hover { color: var(--cyan); }
+  .hero__socials a:hover::after { transform: scaleX(1); }
 
   .hero__scroll { position: absolute; bottom: 2rem; left: 50%; transform: translateX(-50%); z-index: 2; display: flex; flex-direction: column; align-items: center; gap: 0.6rem; color: var(--ink-faint); }
   .hero__scroll .mono { font-size: 0.62rem; letter-spacing: 0.28em; text-transform: uppercase; }

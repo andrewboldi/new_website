@@ -34,15 +34,24 @@ const year = new Date().getFullYear();
 </footer>
 
 <style>
-  .foot { border-top: 1px solid var(--line); margin-top: 4rem; padding-block: 4rem 2rem; background: linear-gradient(180deg, transparent, var(--bg-2)); }
+  /* relative + z-index keeps the footer above the fixed background canvas (clickable). */
+  .foot { position: relative; z-index: 2; border-top: 1px solid var(--line); margin-top: 4rem; padding-block: 4rem 2rem; background: linear-gradient(180deg, var(--bg-2) 0%, var(--bg) 100%); }
   .foot__grid { display: grid; grid-template-columns: 1.6fr 1fr 1fr; gap: 2.5rem; }
   .foot__name { font-size: clamp(2rem, 6vw, 3rem); }
   .foot__tag { max-width: 30ch; margin-top: 0.4rem; }
   .foot__loc { margin-top: 1rem; font-size: 0.78rem; color: var(--cyan); letter-spacing: 0.08em; }
   .foot__col { display: flex; flex-direction: column; gap: 0.7rem; }
   .foot__col .eyebrow { margin-bottom: 0.5rem; }
-  .foot__col a { color: var(--ink-dim); transition: color 0.3s, transform 0.3s var(--ease); width: fit-content; }
-  .foot__col a:hover { color: var(--cyan); transform: translateX(4px); }
+  .foot__col a { position: relative; color: var(--ink-dim); transition: color 0.35s var(--ease); width: fit-content; }
+  .foot__col a::after {
+    content: ''; position: absolute; left: 0; bottom: -3px; height: 1px; width: 100%;
+    background: linear-gradient(90deg, var(--cyan), var(--blue));
+    transform: scaleX(0); transform-origin: left; transition: transform 0.45s var(--ease);
+  }
+  .foot__col a:hover { color: var(--cyan); }
+  .foot__col a:hover::after { transform: scaleX(1); }
+  .foot__col a .faint { transition: color 0.35s; }
+  .foot__col a:hover .faint { color: var(--cyan-soft); }
   .foot__base { display: flex; justify-content: space-between; align-items: center; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 0.72rem; }
   @media (max-width: 760px) {
     .foot__grid { grid-template-columns: 1fr 1fr; }
