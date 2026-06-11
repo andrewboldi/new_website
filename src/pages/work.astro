@@ -48,13 +48,14 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
 
   <!-- ===== INTERLUDE SCENE ===== -->
   <section class="interlude">
-    <Scene name="molecule" pdb="aspirin" class="abs-fill interlude__scene" />
+    <Scene name="molecule" pdb="ineleganolide" class="abs-fill interlude__scene" label="A rotating ball-and-stick model of ineleganolide, a polycyclic norcembranoid." />
     <div class="wrap interlude__text">
       <p class="eyebrow" data-reveal>At the bench &amp; in silico</p>
       <p class="interlude__quote display" data-reveal>
-        “Sixteen consecutive steps toward a diterpenoid — then teaching a model to plan the
+        “A fragment of <em>ineleganolide</em> — then teaching a model to plan the
         route itself.”
       </p>
+      <p class="interlude__cap mono" data-reveal>ineleganolide · a polycyclic norcembranoid diterpene</p>
     </div>
   </section>
 
@@ -112,7 +113,9 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
   .interlude { position: relative; min-height: 70vh; display: flex; align-items: center; overflow: hidden; margin: 3rem 0; }
   .interlude__scene { z-index: 0; }
   .interlude__text { position: relative; z-index: 2; pointer-events: none; }
-  .interlude__quote { font-size: clamp(1.6rem, 1.2rem + 2.6vw, 3.4rem); max-width: 22ch; margin-top: 1rem; text-shadow: 0 4px 40px var(--bg); }
+  .interlude__quote { font-size: clamp(1.6rem, 1.2rem + 2.6vw, 3.4rem); max-width: 24ch; margin-top: 1rem; text-shadow: 0 4px 40px var(--bg); }
+  .interlude__quote em { font-style: italic; color: var(--cyan-soft); }
+  .interlude__cap { margin-top: 1.2rem; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--cyan); text-shadow: 0 2px 20px var(--bg); }
 
   /* projects */
   .projects__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }

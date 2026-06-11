@@ -6,7 +6,7 @@
  */
 import * as THREE from 'three';
 import type { SceneHandle } from './core';
-import { PALETTE, smoothstep } from './core';
+import { PALETTE } from './core';
 import { cloud, helix, benzene, orbital, wave, neural, type ShapeGen } from './shapes';
 
 export interface Stage { gen: ShapeGen; label: string; accent: number; }
@@ -101,7 +101,10 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
 
   let progress = 0;       // eased scroll progress 0..1
   let lastStage = -1;
-  let lastI = -1, lastBlend = -1; // skip the morph loop when nothing changed
+  let lastI = -1, lastF = -1; // skip the morph loop when nothing changed
+  // per-particle phase so the morph cascades organically instead of snapping in lockstep
+  const stagger = new Float32Array(N);
+  for (let k = 0; k < N; k++) stagger[k] = Math.random();
 
   const scrollProgress = () => {
     // window.scrollY is robust even when `body { overflow-x: hidden }` makes the
@@ -119,22 +122,28 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
     const span = stages.length - 1;
     const sf = progress * span;
     const i = Math.min(span - 1, Math.floor(sf));
-    // hold each shape for most of its scroll range, morph quickly in the middle
-    const blend = smoothstep(0.32, 0.68, sf - i);
+    const f = sf - i;
 
     // only rewrite the buffers when the shape state actually moved (the drift in
     // the vertex shader keeps it alive while idle) — this is the scroll-cost win
-    if (i !== lastI || Math.abs(blend - lastBlend) > 0.0015) {
-      lastI = i; lastBlend = blend;
+    if (i !== lastI || Math.abs(f - lastF) > 0.0008) {
+      lastI = i; lastF = f;
       const a = targets[i], b = targets[i + 1];
+      // brief hold at each end keeps shapes legible; the middle is a staggered,
+      // eased cascade so particles flow into the next shape rather than snapping.
+      const HOLD = 0.2;
+      const g = Math.min(1, Math.max(0, (f - HOLD) / (1 - 2 * HOLD)));
+      const W = 0.6; // fraction of the cascade each particle takes to travel
       for (let k = 0; k < N; k++) {
+        const x = (g - stagger[k] * (1 - W)) / W;
+        const pb = x <= 0 ? 0 : x >= 1 ? 1 : x * x * x * (x * (x * 6 - 15) + 10); // smootherstep
         const k3 = k * 3;
-        positions[k3] = a.p[k3] + (b.p[k3] - a.p[k3]) * blend;
-        positions[k3 + 1] = a.p[k3 + 1] + (b.p[k3 + 1] - a.p[k3 + 1]) * blend;
-        positions[k3 + 2] = a.p[k3 + 2] + (b.p[k3 + 2] - a.p[k3 + 2]) * blend;
-        colors[k3] = a.c[k3] + (b.c[k3] - a.c[k3]) * blend;
-        colors[k3 + 1] = a.c[k3 + 1] + (b.c[k3 + 1] - a.c[k3 + 1]) * blend;
-        colors[k3 + 2] = a.c[k3 + 2] + (b.c[k3 + 2] - a.c[k3 + 2]) * blend;
+        positions[k3] = a.p[k3] + (b.p[k3] - a.p[k3]) * pb;
+        positions[k3 + 1] = a.p[k3 + 1] + (b.p[k3 + 1] - a.p[k3 + 1]) * pb;
+        positions[k3 + 2] = a.p[k3 + 2] + (b.p[k3 + 2] - a.p[k3 + 2]) * pb;
+        colors[k3] = a.c[k3] + (b.c[k3] - a.c[k3]) * pb;
+        colors[k3 + 1] = a.c[k3 + 1] + (b.c[k3 + 1] - a.c[k3 + 1]) * pb;
+        colors[k3 + 2] = a.c[k3 + 2] + (b.c[k3 + 2] - a.c[k3 + 2]) * pb;
       }
       geo.attributes.position.needsUpdate = true;
       geo.attributes.aColor.needsUpdate = true;
