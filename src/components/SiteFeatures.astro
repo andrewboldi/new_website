@@ -1,0 +1,171 @@
+---
+import { NAV, SOCIALS, SITE, url } from '@/lib/site';
+const cmds = [
+  ...NAV.map((n) => ({ label: `Go to ${n.label}`, hint: 'page', href: url(n.path), key: '' })),
+  ...SOCIALS.map((s) => ({ label: `${s.label} — ${s.handle}`, hint: 'link', href: s.href, key: '' })),
+  { label: 'Copy email address', hint: 'action', href: '', key: 'email' },
+  { label: 'Solve a Rubik’s cube (9.42s)', hint: 'fun', href: '', key: 'cube' },
+];
+---
+
+<!-- scroll progress -->
+<div class="scrollbar" id="scrollbar" aria-hidden="true"></div>
+
+<!-- back to top -->
+<button class="totop" id="totop" aria-label="Back to top">↑</button>
+
+<!-- command palette -->
+<div class="cmdk" id="cmdk" hidden>
+  <div class="cmdk__backdrop" data-cmdk-close></div>
+  <div class="cmdk__panel" role="dialog" aria-modal="true" aria-label="Command palette">
+    <input class="cmdk__input" id="cmdk-input" type="text" placeholder="Jump to… (try a page, a link, or ‘cube’)" autocomplete="off" spellcheck="false" />
+    <ul class="cmdk__list" id="cmdk-list">
+      {cmds.map((c, i) => (
+        <li class="cmdk__item" data-i={i} data-href={c.href} data-key={c.key}>
+          <span class="cmdk__label">{c.label}</span><span class="cmdk__hint mono">{c.hint}</span>
+        </li>
+      ))}
+    </ul>
+    <div class="cmdk__foot mono"><kbd>↑↓</kbd> navigate · <kbd>↵</kbd> select · <kbd>esc</kbd> close</div>
+  </div>
+</div>
+
+<!-- toast -->
+<div class="toast" id="toast" aria-live="polite"></div>
+
+<style>
+  .scrollbar { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 120; background: linear-gradient(90deg, var(--blue), var(--cyan)); box-shadow: 0 0 10px var(--cyan); transition: width 0.1s linear; }
+  .totop { position: fixed; bottom: 1.4rem; right: 1.4rem; z-index: 90; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(8px); color: var(--ink); cursor: pointer; opacity: 0; transform: translateY(10px); transition: opacity 0.4s var(--ease), transform 0.4s var(--ease), border-color 0.3s; }
+  .totop.show { opacity: 1; transform: none; }
+  .totop:hover { border-color: var(--cyan); color: var(--cyan); }
+
+  .cmdk { position: fixed; inset: 0; z-index: 300; display: grid; place-items: start center; padding-top: 14vh; }
+  .cmdk[hidden] { display: none; }
+  .cmdk__backdrop { position: absolute; inset: 0; background: rgba(4,6,12,0.6); backdrop-filter: blur(6px); }
+  .cmdk__panel { position: relative; width: min(560px, 92vw); border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden; background: linear-gradient(180deg, var(--surface), var(--bg-2)); box-shadow: 0 40px 100px -30px #000; animation: cmdkin 0.3s var(--ease); }
+  @keyframes cmdkin { from { opacity: 0; transform: translateY(-10px); } }
+  .cmdk__input { width: 100%; padding: 1.1rem 1.3rem; background: none; border: 0; border-bottom: 1px solid var(--line); color: var(--ink); font-size: 1.05rem; font-family: var(--sans); outline: none; }
+  .cmdk__list { list-style: none; margin: 0; padding: 0.5rem; max-height: 46vh; overflow-y: auto; }
+  .cmdk__item { display: flex; justify-content: space-between; align-items: center; gap: 1rem; padding: 0.7rem 0.9rem; border-radius: 9px; cursor: pointer; }
+  .cmdk__item.is-active, .cmdk__item:hover { background: rgba(0,153,255,0.12); }
+  .cmdk__item[hidden] { display: none; }
+  .cmdk__label { font-size: 0.95rem; }
+  .cmdk__hint { font-size: 0.66rem; color: var(--ink-faint); text-transform: uppercase; letter-spacing: 0.1em; }
+  .cmdk__foot { padding: 0.6rem 1rem; border-top: 1px solid var(--line); font-size: 0.66rem; color: var(--ink-faint); }
+  .cmdk__foot kbd { color: var(--ink-dim); }
+
+  .toast { position: fixed; bottom: 1.6rem; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 310; padding: 0.7rem 1.2rem; border-radius: 100px; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(10px); color: var(--ink); font-size: 0.85rem; opacity: 0; pointer-events: none; transition: opacity 0.4s var(--ease), transform 0.4s var(--ease); }
+  .toast.show { opacity: 1; transform: translateX(-50%); }
+  @media (max-width: 560px) { .totop { display: none; } }
+</style>
+
+<script>
+  import { SITE } from '@/lib/site';
+
+  const bar = document.getElementById('scrollbar')!;
+  const totop = document.getElementById('totop')!;
+  const onScroll = () => {
+    const h = document.documentElement.scrollHeight - innerHeight;
+    const p = h > 0 ? scrollY / h : 0;
+    bar.style.width = `${p * 100}%`;
+    totop.classList.toggle('show', scrollY > innerHeight * 0.7);
+  };
+  addEventListener('scroll', onScroll, { passive: true }); onScroll();
+  totop.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+
+  // toast helper
+  const toast = document.getElementById('toast')!;
+  let toastTimer: number | undefined;
+  const showToast = (msg: string) => {
+    toast.textContent = msg; toast.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3200);
+  };
+
+  // ---- command palette ----
+  const cmdk = document.getElementById('cmdk')!;
+  const input = document.getElementById('cmdk-input') as HTMLInputElement;
+  const items = Array.from(document.querySelectorAll<HTMLElement>('.cmdk__item'));
+  let active = 0;
+  const visible = () => items.filter((i) => !i.hidden);
+  const setActive = (n: number) => {
+    const vis = visible(); if (!vis.length) return;
+    active = (n + vis.length) % vis.length;
+    items.forEach((i) => i.classList.remove('is-active'));
+    vis[active].classList.add('is-active');
+    vis[active].scrollIntoView({ block: 'nearest' });
+  };
+  const openCmd = () => { cmdk.hidden = false; input.value = ''; filter(''); input.focus(); };
+  const closeCmd = () => { cmdk.hidden = true; };
+  const run = (el: HTMLElement) => {
+    const href = el.dataset.href, key = el.dataset.key;
+    closeCmd();
+    if (key === 'email') { navigator.clipboard?.writeText(SITE.email); showToast('Email copied ✓'); }
+    else if (key === 'cube') { window.dispatchEvent(new CustomEvent('fx:cube')); }
+    else if (href) { if (href.startsWith('http')) open(href, '_blank'); else location.href = href; }
+  };
+  const filter = (q: string) => {
+    const s = q.toLowerCase();
+    items.forEach((i) => { i.hidden = !!s && !(i.querySelector('.cmdk__label')?.textContent || '').toLowerCase().includes(s); });
+    active = 0; setActive(0);
+  };
+  input?.addEventListener('input', () => filter(input.value));
+  items.forEach((i) => i.addEventListener('click', () => run(i)));
+  cmdk.querySelectorAll('[data-cmdk-close]').forEach((b) => b.addEventListener('click', closeCmd));
+
+  addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); cmdk.hidden ? openCmd() : closeCmd(); return; }
+    if (cmdk.hidden) return;
+    if (e.key === 'Escape') closeCmd();
+    else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+    else if (e.key === 'Enter') { e.preventDefault(); const v = visible(); if (v[active]) run(v[active]); }
+  });
+
+  // ---- keyboard nav: press g then h/a/w/l ; '/' opens palette ----
+  let gPending = false, gTimer: number | undefined;
+  const NAVMAP: Record<string, string> = {
+    h: '/', a: '/about', w: '/work', l: '/bookshelf',
+  };
+  addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+    if (e.key === '/' && cmdk.hidden) { e.preventDefault(); openCmd(); return; }
+    if (e.key === 'g') { gPending = true; clearTimeout(gTimer); gTimer = window.setTimeout(() => (gPending = false), 900); return; }
+    if (gPending && NAVMAP[e.key]) {
+      gPending = false;
+      const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+      location.href = base + (NAVMAP[e.key] === '/' ? '/' : NAVMAP[e.key]);
+    } else gPending = false;
+  });
+
+  // ---- easter eggs: Konami + typing 'cube' ----
+  const konami = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
+  let kIdx = 0, typed = '';
+  addEventListener('keydown', (e) => {
+    kIdx = e.key === konami[kIdx] ? kIdx + 1 : (e.key === konami[0] ? 1 : 0);
+    if (kIdx === konami.length) { kIdx = 0; document.body.animate([{ filter: 'hue-rotate(0)' }, { filter: 'hue-rotate(360deg)' }], { duration: 1400 }); showToast('⚛ unlocked — Andrew solves the 3×3 in 9.42s'); }
+    if (/^[a-z]$/.test(e.key)) { typed = (typed + e.key).slice(-5); if (typed.endsWith('cube')) { typed = ''; window.dispatchEvent(new CustomEvent('fx:cube')); } }
+  });
+
+  // ---- piano: number keys 1–9 play a C-major scale (Andrew's a pianist) ----
+  let actx: AudioContext | null = null;
+  const scale = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25, 587.33];
+  addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return;
+    const n = '123456789'.indexOf(e.key);
+    if (n < 0) return;
+    actx = actx || new (window.AudioContext || (window as any).webkitAudioContext)();
+    const t = actx.currentTime;
+    const o = actx.createOscillator(), g = actx.createGain();
+    o.type = 'triangle'; o.frequency.value = scale[n];
+    const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = scale[n] * 2;
+    const g2 = actx.createGain(); g2.gain.value = 0.04;
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.exponentialRampToValueAtTime(0.16, t + 0.008);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+    o.connect(g).connect(actx.destination);
+    o2.connect(g2).connect(g);
+    o.start(t); o2.start(t); o.stop(t + 0.95); o2.stop(t + 0.95);
+  });
+</script>

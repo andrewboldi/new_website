@@ -1,0 +1,55 @@
+---
+const stats = [
+  { value: 9.42, dec: 2, suffix: 's', label: 'fastest 3×3 solve' },
+  { value: 20, suffix: 'K+', label: 'AMC Trainer users' },
+  { value: 30, suffix: '+', label: 'piano competition wins' },
+  { value: 460, suffix: '+', label: 'students taught' },
+  { value: 22, suffix: '', label: 'ADMET datasets benchmarked' },
+  { value: 16, suffix: '', label: 'consecutive synthesis steps' },
+];
+---
+
+<section class="section stats">
+  <div class="wrap">
+    <p class="eyebrow center" data-reveal>By the numbers</p>
+    <div class="stats__grid">
+      {stats.map((s, i) => (
+        <div class="stat" data-reveal data-reveal-delay={i * 60}>
+          <span class="stat__num display" data-target={s.value} data-dec={s.dec ?? 0} data-suffix={s.suffix}>0</span>
+          <span class="stat__label muted">{s.label}</span>
+        </div>
+      ))}
+    </div>
+  </div>
+</section>
+
+<style>
+  .stats__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 1.5rem 1rem; margin-top: 2.5rem; }
+  .stat { text-align: center; display: flex; flex-direction: column; gap: 0.4rem; }
+  .stat__num { font-size: clamp(2.4rem, 1.6rem + 3vw, 4rem); line-height: 1; background: linear-gradient(180deg, var(--cyan-soft), var(--blue)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stat__label { font-size: 0.82rem; max-width: 18ch; margin: 0 auto; }
+</style>
+
+<script>
+  const nums = document.querySelectorAll<HTMLElement>('.stat__num');
+  const io = new IntersectionObserver((entries) => {
+    for (const e of entries) {
+      if (!e.isIntersecting) continue;
+      const el = e.target as HTMLElement;
+      io.unobserve(el);
+      const target = parseFloat(el.dataset.target || '0');
+      const dec = parseInt(el.dataset.dec || '0', 10);
+      const suffix = el.dataset.suffix || '';
+      const dur = 1400;
+      const start = performance.now();
+      const tick = (now: number) => {
+        const t = Math.min(1, (now - start) / dur);
+        const eased = 1 - Math.pow(1 - t, 3);
+        el.textContent = (target * eased).toFixed(dec) + suffix;
+        if (t < 1) requestAnimationFrame(tick); else el.textContent = target.toFixed(dec) + suffix;
+      };
+      requestAnimationFrame(tick);
+    }
+  }, { threshold: 0.4 });
+  nums.forEach((n) => io.observe(n));
+</script>

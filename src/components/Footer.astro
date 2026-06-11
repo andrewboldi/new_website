@@ -29,9 +29,37 @@ const year = new Date().getFullYear();
 
   <div class="wrap foot__base">
     <span class="mono">© {year} — built with three.js & a lot of curiosity</span>
-    <span class="mono foot__sig">lat 37.51°N · lng 122.26°W</span>
+    <div class="binclock" id="binclock" title="binary clock — Andrew made one in Python" aria-hidden="true"></div>
   </div>
 </footer>
+
+<style>
+  .binclock { display: flex; gap: 6px; align-items: flex-end; }
+  .binclock__col { display: flex; flex-direction: column-reverse; gap: 4px; }
+  .binclock__dot { width: 7px; height: 7px; border-radius: 50%; background: var(--line-2); transition: background 0.3s, box-shadow 0.3s; }
+  .binclock__dot.on { background: var(--cyan); box-shadow: 0 0 7px var(--cyan); }
+  @media (max-width: 760px) { .binclock { display: none; } }
+</style>
+
+<script>
+  const root = document.getElementById('binclock');
+  if (root) {
+    const heights = [2, 4, 3, 4, 3, 4]; // bits per BCD column: H10 H1 M10 M1 S10 S1
+    const dots: HTMLElement[][] = heights.map((h) => {
+      const col = document.createElement('div'); col.className = 'binclock__col';
+      const cd: HTMLElement[] = [];
+      for (let i = 0; i < h; i++) { const d = document.createElement('div'); d.className = 'binclock__dot'; col.appendChild(d); cd.push(d); }
+      root.appendChild(col); return cd;
+    });
+    const tick = () => {
+      const n = new Date();
+      const digits = [Math.floor(n.getHours() / 10), n.getHours() % 10, Math.floor(n.getMinutes() / 10), n.getMinutes() % 10, Math.floor(n.getSeconds() / 10), n.getSeconds() % 10];
+      digits.forEach((val, c) => dots[c].forEach((d, b) => d.classList.toggle('on', !!((val >> b) & 1))));
+    };
+    tick(); setInterval(tick, 1000);
+  }
+</script>
+
 
 <style>
   /* relative + z-index keeps the footer above the fixed background canvas (clickable). */

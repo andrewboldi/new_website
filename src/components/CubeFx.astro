@@ -1,0 +1,39 @@
+---
+// Rubik's cube easter-egg overlay. Triggered by the `fx:cube` event (⌘K action
+// or typing "cube"). Mounts on demand and tears down after a few seconds.
+---
+<div class="cubefx" id="cubefx" hidden aria-hidden="true">
+  <div class="cubefx__host scene-host" id="cubefx-host"></div>
+  <p class="cubefx__cap mono">solving<span class="cubefx__dots"></span> · pb 9.42s</p>
+</div>
+
+<style>
+  .cubefx { position: fixed; inset: 0; z-index: 280; display: grid; place-items: center; pointer-events: none; opacity: 0; transition: opacity 0.5s var(--ease); }
+  .cubefx[hidden] { display: none; }
+  .cubefx.show { opacity: 1; }
+  .cubefx__host { width: min(340px, 70vw); height: min(340px, 70vw); }
+  .cubefx__cap { margin-top: 0.6rem; font-size: 0.74rem; letter-spacing: 0.16em; color: var(--cyan); text-align: center; }
+  .cubefx__dots::after { content: '…'; animation: dots 1.2s steps(4) infinite; }
+  @keyframes dots { 0% { content: ''; } 25% { content: '·'; } 50% { content: '··'; } 75% { content: '···'; } }
+</style>
+
+<script>
+  import { mount } from '@/lib/three/core';
+  let handle: any = null, hideTimer: number | undefined;
+  const wrap = document.getElementById('cubefx');
+  const host = document.getElementById('cubefx-host');
+  addEventListener('fx:cube', async () => {
+    if (!wrap || !host) return;
+    wrap.hidden = false;
+    requestAnimationFrame(() => wrap.classList.add('show'));
+    if (!handle) {
+      const { rubiksCube } = await import('@/lib/three/RubiksCube');
+      handle = mount(host, (h) => rubiksCube(h), { alpha: true, cameraZ: 8 });
+    }
+    clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(() => {
+      wrap.classList.remove('show');
+      setTimeout(() => { wrap.hidden = true; handle?.destroy(); handle = null; host.dataset.mounted = ''; }, 520);
+    }, 7000);
+  });
+</script>

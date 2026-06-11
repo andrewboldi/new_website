@@ -1,0 +1,33 @@
+---
+import Base from '@/layouts/Base.astro';
+import MorphBackground from '@/components/MorphBackground.astro';
+import { url } from '@/lib/site';
+---
+
+<Base title="404 — not found" description="This molecule doesn't exist.">
+  <MorphBackground />
+  <section class="nf">
+    <div class="wrap nf__inner">
+      <p class="eyebrow">Error · 404</p>
+      <h1 class="display nf__code">4<span class="nf__o">⌬</span>4</h1>
+      <p class="nf__msg">This molecule doesn’t exist — the bond you followed leads nowhere.</p>
+      <div class="nf__actions">
+        <a class="btn btn--solid" href={url('/')}>Back to the start</a>
+        <a class="btn" href={url('/work')}>See the work</a>
+      </div>
+      <p class="nf__hint mono faint">tip: press <kbd>⌘</kbd>/<kbd>ctrl</kbd> + <kbd>k</kbd> anywhere to jump around.</p>
+    </div>
+  </section>
+</Base>
+
+<style>
+  .nf { min-height: 86vh; display: grid; place-items: center; position: relative; z-index: 1; text-align: center; }
+  .nf__inner { display: flex; flex-direction: column; align-items: center; gap: 0.6rem; }
+  .nf__code { font-size: clamp(6rem, 24vw, 16rem); line-height: 0.9; }
+  .nf__o { color: var(--cyan); display: inline-block; animation: spin 12s linear infinite; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .nf__msg { max-width: 40ch; color: var(--ink-dim); font-size: 1.1rem; margin-top: 0.6rem; }
+  .nf__actions { display: flex; gap: 0.8rem; margin-top: 1.6rem; flex-wrap: wrap; justify-content: center; }
+  .nf__hint { margin-top: 1.6rem; font-size: 0.72rem; }
+  .nf__hint kbd { color: var(--ink-dim); }
+</style>

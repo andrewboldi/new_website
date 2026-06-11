@@ -1,6 +1,7 @@
 ---
 import Base from '@/layouts/Base.astro';
 import MorphBackground from '@/components/MorphBackground.astro';
+import Stats from '@/components/Stats.astro';
 import { SITE, SOCIALS, url } from '@/lib/site';
 import { FIELDS, PROJECTS } from '@/lib/data';
 import { getCollection } from 'astro:content';
@@ -63,6 +64,8 @@ try {
         </p>
       </div>
     </section>
+
+    <Stats />
 
     <!-- ================= FIELDS ================= -->
     <section class="section fields" id="fields">

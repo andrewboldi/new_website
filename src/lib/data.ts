@@ -209,6 +209,40 @@ export const PROJECTS: Project[] = [
     tags: ['Spectroscopy', 'Chemistry'],
     link: { href: 'https://youtu.be/xdqA7C0FEdU', label: 'Video demo' },
   },
+  {
+    name: 'Three-Body Invariants',
+    blurb:
+      'Searching for conserved quantities in the chaotic three-body problem via ' +
+      'automatic generation of candidate symbolic expressions.',
+    tags: ['Physics', 'Symbolic', 'Search'],
+    link: { href: 'https://github.com/andrewboldi/tbp', label: 'tbp' },
+  },
+  {
+    name: 'Oscillations',
+    blurb: 'An interactive visualizer for damped harmonic oscillators — tune the damping and watch the phase portrait respond.',
+    tags: ['Physics', 'Visualization'],
+    link: { href: 'https://github.com/andrewboldi/oscillations', label: 'oscillations' },
+  },
+  {
+    name: 'musalpha',
+    blurb: 'Hear language as music — mapping the structure of text onto sound.',
+    tags: ['Audio', 'Language'],
+    link: { href: 'https://github.com/andrewboldi/musalpha', label: 'musalpha' },
+  },
+  {
+    name: 'squanmate',
+    blurb: 'A Square-1 trainer, solver, and analysis tool — for the speedcubing habit.',
+    tags: ['Puzzles', 'Algorithms'],
+    link: { href: 'https://github.com/andrewboldi/squanmate', label: 'squanmate' },
+  },
+  {
+    name: 'Obsidian Vault Sync',
+    blurb:
+      'Streaming, REST-based GitHub sync for Obsidian that works on iOS for vaults of ' +
+      'any size, images included.',
+    tags: ['TypeScript', 'Tools'],
+    link: { href: 'https://github.com/andrewboldi/obsidian-vault-sync', label: 'obsidian-vault-sync' },
+  },
 ];
 
 export interface Polymath {

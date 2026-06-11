@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://andrewboldi.github.io/new_website/sitemap-index.xml
