@@ -21,8 +21,7 @@ export const NAV = [
   { label: 'Index', path: '/' },
   { label: 'About', path: '/about' },
   { label: 'Work', path: '/work' },
-  { label: 'Writing', path: '/blog' },
-  { label: 'Bookshelf', path: '/bookshelf' },
+  { label: 'Library', path: '/bookshelf' },
 ];
 
 /** Build a path that respects Astro's configured base. */

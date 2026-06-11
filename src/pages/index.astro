@@ -119,14 +119,14 @@ try {
             {posts.length === 0 && <li class="muted">Notes are loading…</li>}
             {posts.map((p) => (
               <li>
-                <a href={url(`/blog/${p.id ?? p.slug}`)}>
+                <a href={url('/bookshelf')}>
                   <span class="post-list__title">{p.data.title}</span>
                   <span class="post-list__meta mono faint">{new Date(p.data.date).toISOString().slice(0, 10)}</span>
                 </a>
               </li>
             ))}
           </ul>
-          <a class="btn btn--ghost" href={url('/blog')}>All writing →</a>
+          <a class="btn btn--ghost" href={url('/bookshelf')}>Unroll the essays →</a>
         </div>
 
         <div class="split__col" data-reveal data-reveal-delay="120">
