@@ -34,7 +34,7 @@ export function threeBody(handle: SceneHandle) {
       const color = new THREE.Color(COLORS[i]);
       const mesh = new THREE.Mesh(sphere, new THREE.MeshBasicMaterial({ color }));
       group.add(mesh);
-      const trail = new THREE.Float32Array(TRAIL * 3);
+      const trail = new Float32Array(TRAIL * 3);
       for (let k = 0; k < TRAIL; k++) { trail[k * 3] = p.x; trail[k * 3 + 1] = p.y; trail[k * 3 + 2] = p.z; }
       const tgeo = new THREE.BufferGeometry();
       tgeo.setAttribute('position', new THREE.BufferAttribute(trail, 3).setUsage(THREE.DynamicDrawUsage));
