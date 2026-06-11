@@ -188,10 +188,168 @@ p a:hover, .prose a:hover { background-size: 100% 1px; color: var(--cyan-soft); 
 .rule { display:flex; align-items:center; gap:1rem; color: var(--ink-faint); font-family: var(--mono); font-size:0.72rem; letter-spacing:0.2em; }
 .rule::before, .rule::after { content:''; height:1px; flex:1; background: var(--line); }
 
-/* ---------- scroll reveal ---------- */
-[data-reveal] { opacity: 0; transform: translateY(22px); transition: opacity 0.9s var(--ease), transform 0.9s var(--ease); }
-[data-reveal].in { opacity: 1; transform: none; }
-@media (prefers-reduced-motion: reduce) { [data-reveal] { opacity: 1; transform: none; } }
+/* ============================================================
+   Scroll reveal — cinematic vocabulary
+   The IO in Base.astro toggles `.in`; everything below is pure
+   CSS transition (off the WebGL main thread → never janks the
+   three.js loop). Default `data-reveal` is a richer rise+blur;
+   opt-in variants via data-reveal="wipe|stagger|blur|rise".
+   ============================================================ */
+
+/* shared easing/timing tokens for reveals */
+:root {
+  --reveal-ease: cubic-bezier(0.16, 1, 0.3, 1);
+  --reveal-dur: 1s;
+  --reveal-delay: 0ms;          /* set per-element by the IO script */
+}
+
+/* DEFAULT: rise + a touch of blur-to-sharp ("microscope focus", on-theme).
+   Subtle blur (6px) so body copy never reflows oddly; layout-safe. */
+[data-reveal] {
+  opacity: 0;
+  transform: translate3d(0, 24px, 0);
+  filter: blur(6px);
+  transition:
+    opacity var(--reveal-dur) var(--reveal-ease) var(--reveal-delay),
+    transform var(--reveal-dur) var(--reveal-ease) var(--reveal-delay),
+    filter var(--reveal-dur) var(--reveal-ease) var(--reveal-delay);
+  will-change: opacity, transform, filter;
+}
+[data-reveal].in {
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+/* once revealed, drop the compositor hint so we don't hold layers */
+[data-reveal].in { will-change: auto; }
+
+/* VARIANT: rise — pure translate, no blur (for fine text where blur shimmers) */
+[data-reveal="rise"] {
+  filter: none;
+  transform: translate3d(0, 30px, 0);
+  transition:
+    opacity var(--reveal-dur) var(--reveal-ease) var(--reveal-delay),
+    transform var(--reveal-dur) var(--reveal-ease) var(--reveal-delay);
+}
+
+/* VARIANT: blur — emphatic blur-to-sharp, minimal travel (dreamy focus pull) */
+[data-reveal="blur"] {
+  transform: translate3d(0, 8px, 0);
+  filter: blur(12px);
+}
+
+/* VARIANT: wipe — mask-wipe: the element's content rises from behind a
+   clipped edge. The host clips; an inner wrapper is what actually moves.
+   Works on a single block; for multi-line headings the whole block wipes. */
+[data-reveal="wipe"] {
+  opacity: 1;            /* the clip does the hiding, not opacity */
+  transform: none;
+  filter: none;
+  overflow: hidden;
+  /* a hair of vertical breathing room so descenders aren't shaved */
+  padding-bottom: 0.08em;
+  margin-bottom: -0.08em;
+}
+[data-reveal="wipe"] > .reveal-wipe__inner {
+  display: block;
+  transform: translate3d(0, 110%, 0);
+  transition: transform calc(var(--reveal-dur) * 1.1) var(--reveal-ease) var(--reveal-delay);
+  will-change: transform;
+}
+[data-reveal="wipe"].in > .reveal-wipe__inner {
+  transform: none;
+  will-change: auto;
+}
+
+/* VARIANT: stagger — heading text split into word spans by the script;
+   each word rises + sharpens with an incremental delay (--word-i). */
+[data-reveal="stagger"] {
+  opacity: 1;            /* words carry the animation, not the block */
+  transform: none;
+  filter: none;
+}
+[data-reveal="stagger"] .reveal-word {
+  display: inline-block;
+  opacity: 0;
+  transform: translate3d(0, 0.5em, 0);
+  filter: blur(8px);
+  transition:
+    opacity 0.72s var(--reveal-ease),
+    transform 0.72s var(--reveal-ease),
+    filter 0.72s var(--reveal-ease);
+  /* per-word cascade, offset after any element-level delay */
+  transition-delay: calc(var(--reveal-delay) + var(--word-i, 0) * 55ms);
+  will-change: opacity, transform, filter;
+}
+/* preserve the space between split words */
+[data-reveal="stagger"] .reveal-word__sp { display: inline-block; white-space: pre; }
+[data-reveal="stagger"].in .reveal-word {
+  opacity: 1;
+  transform: none;
+  filter: none;
+  will-change: auto;
+}
+
+/* Reduced-motion: everything is instantly, statically visible — no motion. */
+@media (prefers-reduced-motion: reduce) {
+  [data-reveal],
+  [data-reveal="rise"],
+  [data-reveal="blur"],
+  [data-reveal="wipe"] {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+  [data-reveal="wipe"] > .reveal-wipe__inner { transform: none !important; }
+  [data-reveal="stagger"] .reveal-word {
+    opacity: 1 !important;
+    transform: none !important;
+    filter: none !important;
+  }
+}
+
+/* ============================================================
+   Scroll-driven "mood" layer
+   A single fixed, full-viewport gradient wash whose hue/position
+   eases with overall scroll progress (--scroll-progress, 0→1,
+   written by the rAF lerp in Base.astro). Very low opacity, behind
+   all content and the WebGL canvases, pointer-events:none — so
+   sections cross-dissolve into one another with NO hard seams.
+   On-brand stops: cyan #38e8c8, blue #0099ff, violet #9d7bff over bg.
+   ============================================================ */
+:root { --scroll-progress: 0; }
+
+.mood-layer {
+  position: fixed;
+  inset: 0;
+  z-index: -1;                 /* above body::before (-2), below content (>=0) */
+  pointer-events: none;
+  /* Two large radial pools drift in opposite directions with scroll, and the
+     whole wash rotates its hue a few degrees — a gentle lighting change, not a
+     color flip. Positions are driven by --scroll-progress. */
+  --p: var(--scroll-progress);
+  background:
+    radial-gradient(60vmax 60vmax
+      at calc(18% + var(--p) * 30%) calc(12% + var(--p) * 22%),
+      rgba(56, 232, 200, 0.10), transparent 60%),
+    radial-gradient(66vmax 66vmax
+      at calc(86% - var(--p) * 26%) calc(80% - var(--p) * 30%),
+      rgba(0, 153, 255, 0.10), transparent 62%),
+    radial-gradient(70vmax 70vmax
+      at calc(50% + (var(--p) - 0.5) * 24%) calc(100% - var(--p) * 40%),
+      rgba(157, 123, 255, 0.085), transparent 60%);
+  /* hue eases ~ -16deg across the whole scroll: cyan-lean at top → violet-lean
+     at bottom. Kept tiny so it reads as mood, never as a recolor. */
+  filter: blur(28px) hue-rotate(calc(var(--p) * -16deg));
+  opacity: 0.85;               /* the gradients themselves are already faint */
+  transition: opacity 0.6s var(--ease);
+  will-change: filter, background;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  /* hold a single static mood (mid-scroll) — present but motionless */
+  .mood-layer { --p: 0.4; filter: blur(28px); }
+}
 
 /* ---------- canvas hosts ---------- */
 .scene-host { position: relative; width: 100%; height: 100%; }

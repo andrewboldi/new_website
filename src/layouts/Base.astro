@@ -41,12 +41,16 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
     <!-- Without JS, reveal-on-scroll content must still be visible. -->
     <noscript>
       <style>
-        [data-reveal] { opacity: 1 !important; transform: none !important; }
+        [data-reveal] { opacity: 1 !important; transform: none !important; filter: none !important; }
+        [data-reveal="wipe"] > .reveal-wipe__inner { transform: none !important; }
+        [data-reveal="stagger"] .reveal-word { opacity: 1 !important; transform: none !important; filter: none !important; }
       </style>
     </noscript>
   </head>
   <body>
     <a href="#main" class="sr-only">Skip to content</a>
+    <!-- scroll-driven ambient mood wash (behind everything; pointer-events:none) -->
+    <div class="mood-layer" aria-hidden="true"></div>
     <BorderArtifacts />
     <div class="cursor" id="cursor" aria-hidden="true"></div>
     <Nav />
@@ -71,7 +75,76 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
     </style>
 
     <script>
-      // ---- scroll reveal ----
+      // ============================================================
+      // Scroll reveal — cinematic vocabulary
+      // The IO just toggles `.in`; all motion is CSS (off the main
+      // thread, so it never janks the three.js render loop). Default
+      // `data-reveal` = rise+blur; opt-in variants via the attribute
+      // value: "wipe" (mask), "stagger" (word cascade), "blur", "rise".
+      // ============================================================
+      const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+      // ---- per-variant DOM prep (skipped entirely under reduced-motion) ----
+      if (!reduceMotion) {
+        // WIPE: wrap the element's existing children in a single inner block
+        // that we slide up from behind the clipped (overflow:hidden) host.
+        document.querySelectorAll('[data-reveal="wipe"]').forEach((host) => {
+          if (host.querySelector(':scope > .reveal-wipe__inner')) return; // idempotent
+          const inner = document.createElement('span');
+          inner.className = 'reveal-wipe__inner';
+          while (host.firstChild) inner.appendChild(host.firstChild);
+          host.appendChild(inner);
+        });
+
+        // STAGGER: split visible text into word spans, preserving inline
+        // markup (<br>, <em>, links, etc.). We only ever wrap TEXT nodes, so
+        // headings using <br/> or set:html keep their structure intact.
+        let wordCounter = 0;
+        const splitTextNode = (node: Text) => {
+          const text = node.nodeValue ?? '';
+          if (!text.trim()) return; // pure whitespace — leave as-is
+          const frag = document.createDocumentFragment();
+          // keep leading/trailing/internal spaces as their own inline spans so
+          // spacing survives inline-block word boxes.
+          const parts = text.split(/(\s+)/);
+          for (const part of parts) {
+            if (part === '') continue;
+            if (/^\s+$/.test(part)) {
+              const sp = document.createElement('span');
+              sp.className = 'reveal-word__sp';
+              sp.textContent = part;
+              frag.appendChild(sp);
+            } else {
+              const w = document.createElement('span');
+              w.className = 'reveal-word';
+              w.style.setProperty('--word-i', String(wordCounter++));
+              w.textContent = part;
+              frag.appendChild(w);
+            }
+          }
+          node.replaceWith(frag);
+        };
+        const walkAndSplit = (el: Element) => {
+          // snapshot child nodes first (we mutate during iteration)
+          for (const child of Array.from(el.childNodes)) {
+            if (child.nodeType === Node.TEXT_NODE) {
+              splitTextNode(child as Text);
+            } else if (
+              child.nodeType === Node.ELEMENT_NODE &&
+              (child as Element).tagName !== 'BR'
+            ) {
+              walkAndSplit(child as Element); // recurse into <em>, <a>, spans…
+            }
+          }
+        };
+        document.querySelectorAll('[data-reveal="stagger"]').forEach((host) => {
+          if (host.querySelector('.reveal-word')) return; // idempotent
+          wordCounter = 0; // restart cascade per heading
+          walkAndSplit(host);
+        });
+      }
+
+      // ---- the observer (unchanged contract: adds `.in`, then unobserves) ----
       const io = new IntersectionObserver(
         (entries) => {
           for (const e of entries) {
@@ -85,10 +158,44 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
       );
       const items = document.querySelectorAll('[data-reveal]');
       items.forEach((el, i) => {
+        // honor data-reveal-delay; otherwise a gentle source-order cascade.
         const delay = (el as HTMLElement).dataset.revealDelay ?? String((i % 6) * 70);
-        (el as HTMLElement).style.transitionDelay = `${delay}ms`;
+        // feed the CSS custom property the transitions key off of.
+        (el as HTMLElement).style.setProperty('--reveal-delay', `${delay}ms`);
         io.observe(el);
       });
+
+      // ---- scroll-driven mood: write an eased --scroll-progress (0→1) ----
+      // One passive listener + a single rAF that only runs while catching up,
+      // lerped for buttery glide. No per-frame allocation. Skipped (held at a
+      // static value by CSS) under reduced-motion.
+      if (!reduceMotion) {
+        const root = document.documentElement;
+        let target = 0;
+        let current = 0;
+        let raf = 0;
+        const measure = () => {
+          const max = document.documentElement.scrollHeight - innerHeight;
+          target = max > 0 ? Math.min(Math.max(scrollY / max, 0), 1) : 0;
+        };
+        const tick = () => {
+          current += (target - current) * 0.08; // ease toward target
+          root.style.setProperty('--scroll-progress', current.toFixed(4));
+          if (Math.abs(target - current) > 0.0005) {
+            raf = requestAnimationFrame(tick);
+          } else {
+            root.style.setProperty('--scroll-progress', target.toFixed(4));
+            raf = 0;
+          }
+        };
+        const kick = () => {
+          measure();
+          if (!raf) raf = requestAnimationFrame(tick);
+        };
+        addEventListener('scroll', kick, { passive: true });
+        addEventListener('resize', kick, { passive: true });
+        kick();
+      }
 
       // ---- custom cursor (pointer devices only) ----
       const cursor = document.getElementById('cursor');
