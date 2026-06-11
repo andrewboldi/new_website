@@ -27,6 +27,8 @@ try {
 
   <!-- ================= HERO ================= -->
   <section class="hero">
+    <!-- crown-jewel GPGPU particle field: curl-noise cloud denoises into caffeine -->
+    <div class="hero__field" id="hero-field" aria-hidden="true"></div>
     <div class="hero__veil"></div>
     <div class="wrap hero__content">
       <p class="eyebrow hero__eyebrow" data-h="0">{SITE.school} · Chem Bio × CS</p>
@@ -160,9 +162,31 @@ try {
   </div>
 </Base>
 
+<script>
+  // Crown-jewel hero: GPGPU curl-noise particle field that denoises into the
+  // caffeine molecule on scroll. Falls back to a CPU Points morph when WebGL2
+  // float render targets are unavailable, so the hero never breaks.
+  import { mount } from '@/lib/three/core';
+  import { heroField } from '@/lib/three/HeroField';
+
+  mount('#hero-field', (h) => heroField(h), {
+    // Controlled glow only — the additive particle field is bright on its own, so
+    // keep bloom gentle + threshold high to avoid blowing the molecule to white.
+    bloom: { strength: 0.4, radius: 0.55, threshold: 0.5 },
+    alpha: true,
+    maxPixelRatio: 2,
+  });
+</script>
+
 <style>
   /* ---------- hero ---------- */
   .hero { position: relative; min-height: 100svh; display: flex; align-items: center; z-index: 1; }
+  /* crown-jewel particle field: fills the hero, sits behind the veil + content.
+     Fixed so the molecule stays put while the page scrolls past it. */
+  .hero__field {
+    position: fixed; inset: 0; z-index: 0; pointer-events: none;
+    height: 100svh;
+  }
   .hero__veil {
     position: absolute; inset: 0; z-index: 0; pointer-events: none;
     background:

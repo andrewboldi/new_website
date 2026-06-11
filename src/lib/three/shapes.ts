@@ -513,3 +513,81 @@ export const lattice: ShapeGen = (pos, col, N, R, aux) => {
 export const SHAPES: Record<string, ShapeGen> = {
   cloud, molecule, helix, benzene, orbital, wave, neural, lattice,
 };
+
+/**
+ * Caffeine TARGET bake for the GPGPU hero — one (x,y,z) + (r,g,b) per particle,
+ * ready to write into a square DataTexture (one texel per particle). It places
+ * particles on the real ball-and-stick skeleton: a budget split of dense atom
+ * clusters (heavier atoms = denser glowing balls, weighted by element) and thin
+ * point-lines along the bonds, colored by element. Reuses the same baked
+ * `caffeine.pdb` geometry as `molecule` (no faking) but writes into a single flat
+ * target so the GPU vertex shader can `mix(simPos, targetPos, progress)`.
+ *
+ * `scale` lets the caller fit the molecule to its world radius (HeroField uses a
+ * world-space R). A domed z (matching `molecule`) gives the near-planar PDB real
+ * relief so it reads as solid from any spin angle. Deterministic-ish via Math.random
+ * (called once at bake time), so the cloud denoises into a recognizable molecule.
+ */
+export function caffeineTarget(
+  outPos: Float32Array,
+  outCol: Float32Array,
+  N: number,
+  scale: number,
+): void {
+  // domed z per atom (forward center, receding rim) — same recipe as `molecule`
+  const zdome = new Float32Array(MOL_ATOMS);
+  for (let a = 0; a < MOL_ATOMS; a++) {
+    const x = MOL_XYZ[a * 3], y = MOL_XYZ[a * 3 + 1], z0 = MOL_XYZ[a * 3 + 2];
+    const rr = Math.hypot(x, y) / MOL_MAX;
+    const dome = (0.5 - rr * rr) * 0.9;
+    const pucker = Math.sin(x * 1.3) * Math.cos(y * 1.3) * 0.18;
+    zdome[a] = (z0 + (dome + pucker) * MOL_MAX) * scale;
+  }
+  const atomBudget = Math.round(N * 0.54);
+  let wSum = 0;
+  for (let a = 0; a < MOL_ATOMS; a++) wSum += ELEM_WEIGHT[MOL_ELEM[a]];
+  let written = 0;
+  for (let a = 0; a < MOL_ATOMS; a++) {
+    const el = MOL_ELEM[a];
+    const ax = MOL_XYZ[a * 3] * scale, ay = MOL_XYZ[a * 3 + 1] * scale, az = zdome[a];
+    const rad = ELEM_RADIUS[el] * scale;
+    let cnt = a === MOL_ATOMS - 1
+      ? atomBudget - written
+      : Math.round((atomBudget * ELEM_WEIGHT[el]) / wSum);
+    if (cnt < 0) cnt = 0;
+    const baseCol = ELEM_COLOR[el];
+    for (let k = 0; k < cnt && written < atomBudget; k++, written++) {
+      const r = rad * Math.cbrt(Math.random()) * (0.55 + 0.45 * Math.random());
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const i = written;
+      outPos[i * 3] = ax + r * Math.sin(phi) * Math.cos(theta);
+      outPos[i * 3 + 1] = ay + r * Math.sin(phi) * Math.sin(theta);
+      outPos[i * 3 + 2] = az + r * Math.cos(phi);
+      tmp.copy(C.white).lerp(baseCol, Math.min(1, r / rad + 0.15));
+      outCol[i * 3] = tmp.r; outCol[i * 3 + 1] = tmp.g; outCol[i * 3 + 2] = tmp.b;
+    }
+  }
+  const a0 = written;
+  const bondParticles = N - a0;
+  for (let b = 0; b < bondParticles; b++) {
+    const i = a0 + b;
+    const e = b % MOL_BOND_COUNT;
+    const ia = MOL_BONDS[e * 2], ib = MOL_BONDS[e * 2 + 1];
+    const x1 = MOL_XYZ[ia * 3] * scale, y1 = MOL_XYZ[ia * 3 + 1] * scale, z1 = zdome[ia];
+    const x2 = MOL_XYZ[ib * 3] * scale, y2 = MOL_XYZ[ib * 3 + 1] * scale, z2 = zdome[ib];
+    const s = Math.random();
+    const jx = (Math.random() - 0.5) * 0.12 * scale;
+    const jy = (Math.random() - 0.5) * 0.12 * scale;
+    const jz = (Math.random() - 0.5) * 0.12 * scale;
+    outPos[i * 3] = x1 + (x2 - x1) * s + jx;
+    outPos[i * 3 + 1] = y1 + (y2 - y1) * s + jy;
+    outPos[i * 3 + 2] = z1 + (z2 - z1) * s + jz;
+    tmp.copy(ELEM_COLOR[MOL_ELEM[ia]]).lerp(ELEM_COLOR[MOL_ELEM[ib]], s).lerp(C.cyan, 0.35);
+    outCol[i * 3] = tmp.r; outCol[i * 3 + 1] = tmp.g; outCol[i * 3 + 2] = tmp.b;
+  }
+}
+
+/** Molecule radius (Å, pre-scale) of the baked caffeine coords — lets callers
+ *  fit it to a target world radius: `scale = worldR / CAFFEINE_RADIUS`. */
+export const CAFFEINE_RADIUS = MOL_MAX;
