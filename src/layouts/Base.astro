@@ -4,6 +4,7 @@ import Nav from '@/components/Nav.astro';
 import Footer from '@/components/Footer.astro';
 import SiteFeatures from '@/components/SiteFeatures.astro';
 import CubeFx from '@/components/CubeFx.astro';
+import BorderArtifacts from '@/components/BorderArtifacts.astro';
 import { SITE, url } from '@/lib/site';
 
 interface Props {
@@ -46,6 +47,7 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
   </head>
   <body>
     <a href="#main" class="sr-only">Skip to content</a>
+    <BorderArtifacts />
     <div class="cursor" id="cursor" aria-hidden="true"></div>
     <Nav />
     <main id="main">

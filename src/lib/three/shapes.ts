@@ -28,7 +28,8 @@ const set = (col: Float32Array, i: number, c: THREE.Color) => {
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
 const tmp = new THREE.Color();
 
-/** Soft glowing sphere — latent chemical space. */
+/** Soft glowing sphere — latent chemical space. (Retained in the shape registry;
+ *  the morph field's opening stage now uses `molecule` instead.) */
 export const cloud: ShapeGen = (pos, col, N, R) => {
   for (let i = 0; i < N; i++) {
     const r = R * Math.cbrt(Math.random());
@@ -39,6 +40,117 @@ export const cloud: ShapeGen = (pos, col, N, R) => {
     pos[i * 3 + 2] = r * Math.cos(phi);
     const t = r / R;
     tmp.copy(C.cyan).lerp(C.blue, t).lerp(C.violet, Math.max(0, t - 0.55));
+    set(col, i, tmp);
+  }
+};
+
+/**
+ * Caffeine — a real ball-and-stick molecule (the morph field's opening stage,
+ * the target of the denoising intro). Atom coordinates are baked from
+ * `public/pdb/caffeine.pdb` (centroid-centered, in ångström); bonds come from
+ * that file's CONECT records. We don't fake the geometry — this is the actual
+ * 1,3,7-trimethylxanthine skeleton (C8N4O2 core + 10 H), so it reads as the
+ * iconic med-chem molecule, not a blob.
+ *
+ * The particle budget is split so atoms become dense glowing clusters and bonds
+ * become point-lines between bonded atoms → unmistakably ball-and-stick. Colored
+ * by element: carbon soft white-blue, nitrogen cyan, oxygen amber, hydrogen a
+ * faint blue. Centroid-centered coords mean MOL_MAX is the molecule's radius, so
+ * we scale it to ≈0.95·R to sit at the same scale as the other shapes.
+ */
+// element index per atom (0..23): 0=C 1=N 2=O 3=H
+const MOL_ELEM = [0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 1, 1, 1, 1, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3];
+// centroid-centered atom coordinates (Å) from caffeine.pdb
+const MOL_XYZ = [
+  -2.474, 1.279, 0, -3.174, -1.133, 0, 1.621, 2.657, 0, 2.334, -2.148, 0,
+  -0.351, -2.4, 0, 3.081, 0.412, 0, 0.071, -1.257, 0, 1.878, 0.236, 0,
+  -0.824, -0.166, 0, -0.316, 1.127, 0, -1.358, 1.962, 0, 1.058, 1.305, 0,
+  1.399, -1.02, 0, -2.199, -0.04, 0, -3.465, 1.708, 0.004, -3.416, -1.405, 1.028,
+  -4.081, -0.812, -0.514, -2.752, -1.997, -0.514, 1.76, 2.993, 1.028, 2.582, 2.651, -0.514,
+  0.938, 3.335, -0.514, 2.565, -2.428, -1.028, 3.251, -1.86, 0.513, 1.88, -2.996, 0.514,
+];
+// bonds (pairs of atom indices) from caffeine.pdb CONECT records
+const MOL_BONDS = [
+  0, 13, 0, 10, 0, 14, 1, 13, 1, 15, 1, 16, 1, 17, 2, 11, 2, 18, 2, 19, 2, 20,
+  3, 12, 3, 21, 3, 22, 3, 23, 4, 6, 5, 7, 6, 8, 6, 12, 7, 11, 7, 12, 8, 9,
+  8, 13, 9, 11, 9, 10,
+];
+const MOL_ATOMS = MOL_ELEM.length;           // 24
+const MOL_BOND_COUNT = MOL_BONDS.length / 2;  // 25
+// molecule radius (max distance from centroid) for the baked coords above
+const MOL_MAX = 4.193;
+// per-element render weights: cluster radius (Å, pre-scale), color, point share
+const ELEM_COLOR = [
+  new THREE.Color(0xcfe0ff), // C — soft white-blue
+  C.cyan,                    // N — cyan (ring nitrogens pop)
+  C.amber,                   // O — carbonyl oxygens warm
+  new THREE.Color(0x6fa8ff), // H — faint blue
+];
+const ELEM_RADIUS = [0.62, 0.66, 0.7, 0.4]; // C, N, O, H (Å, pre-scale)
+const ELEM_WEIGHT = [1.0, 1.15, 1.2, 0.45]; // particle share per atom by element
+
+// scratch: domed z per atom, so the (nearly planar) PDB gains depth and reads
+// as a solid ball-and-stick from any spin angle instead of vanishing edge-on.
+// Atoms and the bonds joining them share these values, so bonds stay attached.
+const MOL_ZDOME = new Float32Array(MOL_ATOMS);
+export const molecule: ShapeGen = (pos, col, N, R) => {
+  const scale = (R * 0.95) / MOL_MAX;
+  // bowl-shaped dome: center pushed forward, rim recedes; small pucker for relief
+  for (let a = 0; a < MOL_ATOMS; a++) {
+    const x = MOL_XYZ[a * 3], y = MOL_XYZ[a * 3 + 1], z0 = MOL_XYZ[a * 3 + 2];
+    const rr = Math.hypot(x, y) / MOL_MAX;            // 0..1 radial
+    const dome = (0.5 - rr * rr) * 0.9;                // forward center, receding rim
+    const pucker = Math.sin(x * 1.3) * Math.cos(y * 1.3) * 0.18;
+    MOL_ZDOME[a] = (z0 + (dome + pucker) * MOL_MAX) * scale;
+  }
+  // Split budget: ~52% to atom clusters, ~48% to bond lines.
+  const atomBudget = Math.round(N * 0.52);
+  // Distribute atom particles proportional to element weight so heavy atoms read
+  // as denser glowing balls and the many H's don't swamp them.
+  let wSum = 0;
+  for (let a = 0; a < MOL_ATOMS; a++) wSum += ELEM_WEIGHT[MOL_ELEM[a]];
+  let written = 0;
+  for (let a = 0; a < MOL_ATOMS; a++) {
+    const el = MOL_ELEM[a];
+    const ax = MOL_XYZ[a * 3] * scale, ay = MOL_XYZ[a * 3 + 1] * scale, az = MOL_ZDOME[a];
+    const rad = ELEM_RADIUS[el] * scale;
+    let cnt = a === MOL_ATOMS - 1
+      ? atomBudget - written
+      : Math.round((atomBudget * ELEM_WEIGHT[el]) / wSum);
+    if (cnt < 0) cnt = 0;
+    const baseCol = ELEM_COLOR[el];
+    for (let k = 0; k < cnt && written < atomBudget; k++, written++) {
+      // gaussian-ish cluster (denser core) around the atom
+      const r = rad * Math.cbrt(Math.random()) * (0.55 + 0.45 * Math.random());
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(2 * Math.random() - 1);
+      const i = written;
+      pos[i * 3] = ax + r * Math.sin(phi) * Math.cos(theta);
+      pos[i * 3 + 1] = ay + r * Math.sin(phi) * Math.sin(theta);
+      pos[i * 3 + 2] = az + r * Math.cos(phi);
+      // bright core fades to element color outward
+      tmp.copy(C.white).lerp(baseCol, Math.min(1, r / rad + 0.15));
+      set(col, i, tmp);
+    }
+  }
+  // Bonds: remaining particles spread along bond segments as thin point-lines.
+  const a0 = written;
+  const bondParticles = N - a0;
+  for (let b = 0; b < bondParticles; b++) {
+    const i = a0 + b;
+    const e = b % MOL_BOND_COUNT;
+    const ia = MOL_BONDS[e * 2], ib = MOL_BONDS[e * 2 + 1];
+    const x1 = MOL_XYZ[ia * 3] * scale, y1 = MOL_XYZ[ia * 3 + 1] * scale, z1 = MOL_ZDOME[ia];
+    const x2 = MOL_XYZ[ib * 3] * scale, y2 = MOL_XYZ[ib * 3 + 1] * scale, z2 = MOL_ZDOME[ib];
+    const s = Math.random();
+    const jx = (Math.random() - 0.5) * 0.12 * scale;
+    const jy = (Math.random() - 0.5) * 0.12 * scale;
+    const jz = (Math.random() - 0.5) * 0.12 * scale;
+    pos[i * 3] = x1 + (x2 - x1) * s + jx;
+    pos[i * 3 + 1] = y1 + (y2 - y1) * s + jy;
+    pos[i * 3 + 2] = z1 + (z2 - z1) * s + jz;
+    // bond color: blend the two atoms' element colors, dimmed toward cyan
+    tmp.copy(ELEM_COLOR[MOL_ELEM[ia]]).lerp(ELEM_COLOR[MOL_ELEM[ib]], s).lerp(C.cyan, 0.35);
     set(col, i, tmp);
   }
 };
@@ -203,5 +315,5 @@ export const lattice: ShapeGen = (pos, col, N, R) => {
 };
 
 export const SHAPES: Record<string, ShapeGen> = {
-  cloud, helix, benzene, orbital, wave, neural, lattice,
+  cloud, molecule, helix, benzene, orbital, wave, neural, lattice,
 };

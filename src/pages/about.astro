@@ -7,10 +7,50 @@ import { SITE, SOCIALS } from '@/lib/site';
 import { POLYMATH, COURSEWORK } from '@/lib/data';
 
 const courseScene: Record<string, string> = {
-  'Machine Learning & CS': 'neuralnet',
+  'Machine Learning & CS': 'gradientdescent',
   Chemistry: 'orbital',
   'Biology & Physics': 'statmech',
 };
+
+// Public-safe lab/research highlights (Caltech total synthesis) — generic terms only.
+const lab = [
+  {
+    scene: 'routegraph',
+    eyebrow: 'Total synthesis',
+    title: 'Building a molecule,<br/>one bond at a time.',
+    body:
+      'Three years in a Caltech total-synthesis lab, mostly at the bench. I completed ' +
+      '16 consecutive reaction steps toward a complex diterpenoid intermediate, plus ' +
+      'shorter fragment syntheses on the side — each step purified, characterized, and ' +
+      'carried forward. Roughly 1,000 hours of hands-on organic synthesis.',
+    stat: '16 consecutive steps',
+  },
+  {
+    scene: 'chromatography',
+    eyebrow: 'Separation & analysis',
+    title: 'Purify, characterize,<br/>repeat.',
+    body:
+      'The daily craft of synthesis is separation and identification: column ' +
+      'chromatography and HPLC to pull one compound from a mixture, then LC/MS, GC/MS, ' +
+      'and NMR to prove what you made. When an HPLC autosampler part broke, I modeled ' +
+      'and 3D-printed a replacement — about $250 saved per part.',
+    stat: '3D-printed HPLC part',
+  },
+  {
+    scene: 'massspec',
+    eyebrow: 'Computation & automation',
+    title: 'I wrote the software<br/>the lab didn’t have.',
+    body:
+      'I reverse-engineered a liquid-handling robot’s M68k firmware in Ghidra to drive it ' +
+      'from code — and, to prove I’d cracked the protocol, made its motors play Liszt’s ' +
+      '“La Campanella.” A Python-over-serial bridge piped live reaction status into a Zoom ' +
+      'chat so I could watch overnight runs from anywhere; another tool pulled 2,600 ' +
+      'catalysts from a supplier’s API into a searchable catalog. For the chemistry itself: ' +
+      'ORCA DFT to rationalize a key step’s selectivity, and AutoDock Vina docking against ' +
+      'an AlphaFold-modeled receptor.',
+    stat: 'Ghidra · ORCA · Vina',
+  },
+];
 ---
 
 <Base title="About" description="Andrew Boldi — chemical biologist, computer scientist, pianist, and incorrigible polymath.">
@@ -26,22 +66,21 @@ const courseScene: Record<string, string> = {
     <div class="wrap bio__grid">
       <div class="bio__text" data-reveal>
         <p class="bio__lead">
-          I’m Andrew — a senior at <strong>UC Berkeley</strong> finishing a B.S. in
-          Chemical Biology and a B.A. in Computer Science. I spend my time at the seam
-          between the two: teaching machines to understand molecules, proteins, and the
-          physics underneath them.
+          I’m Andrew — I work at the seam between <strong>chemistry</strong> and
+          <strong>computation</strong>: teaching machines to understand molecules,
+          proteins, and the physics underneath them.
         </p>
         <p>
           Right now I’m an AI intern at <strong>Soley Therapeutics</strong>, working on
           molecular machine learning for drug discovery — explainability, generative
-          chemistry, and foundation models for molecular property prediction. Before that
-          I spent three years in <strong>Brian Stoltz’s lab at Caltech</strong> doing
-          total synthesis at the bench and computational modeling in ORCA, and writing
-          software to automate the lab around me.
+          chemistry, and foundation models for molecular property prediction. Before that,
+          three years in <strong>Brian Stoltz’s lab at Caltech</strong>: total synthesis at
+          the bench, computational modeling in ORCA, and software to automate the lab
+          around me.
         </p>
         <p>
           I’m a polymath by temperament. I’ve shipped apps used by tens of thousands of
-          people, reverse-engineered M68k assembly, 3D-printed replacement lab parts, and
+          people, reverse-engineered a lab robot’s firmware until it played Liszt, and
           turned prime numbers into music. The throughline is simple: <em>I want to solve
           the hardest problems in science, and I think computation is how we get there.</em>
         </p>
@@ -78,6 +117,34 @@ const courseScene: Record<string, string> = {
     </div>
   </section>
 
+  <!-- ===== RESEARCH & LAB ===== -->
+  <section class="section lab">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow" data-reveal>Research &amp; lab</p>
+        <h2 class="display sec-title" data-reveal>Three years<br/>at the bench.</h2>
+        <p class="muted lab__intro" data-reveal>
+          Before the machine-learning work, I did total synthesis in Brian Stoltz’s lab at
+          Caltech — making complex natural-product molecules from scratch, characterizing
+          every intermediate, and writing software to automate the instruments around me.
+        </p>
+      </header>
+      <div class="lab__rows">
+        {lab.map((row, i) => (
+          <article class={`lab__row ${i % 2 ? 'lab__row--alt' : ''}`} data-reveal>
+            <div class="lab__scene"><Scene name={row.scene as any} /></div>
+            <div class="lab__copy">
+              <p class="eyebrow lab__eyebrow">{row.eyebrow}</p>
+              <h3 class="display lab__title" set:html={row.title} />
+              <p class="lab__body">{row.body}</p>
+              <span class="lab__stat mono">{row.stat}</span>
+            </div>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
+
   <!-- ===== POLYMATH ===== -->
   <section class="section poly">
     <div class="wrap">
@@ -85,6 +152,22 @@ const courseScene: Record<string, string> = {
         <p class="eyebrow" data-reveal>Beyond the lab</p>
         <h2 class="display sec-title" data-reveal>The other half<br/>of the brain.</h2>
       </header>
+
+      <div class="poly__piano" data-reveal>
+        <div class="poly__piano-scene"><Scene name="piano" /></div>
+        <div class="poly__piano-cap">
+          <p class="eyebrow">At the piano</p>
+          <h3 class="display poly__piano-title">Chopin — “Revolutionary.”</h3>
+          <p class="poly__piano-sub">
+            I’ve performed at Carnegie Hall and Merkin Hall. This is my Étude Op. 10 No. 12
+            in C minor — rendered live from the score, every note in real time. Tap the
+            speaker in the corner to hear it.
+          </p>
+          <a class="btn poly__piano-link" href="https://youtube.com/@AndrewBoldiPiano" target="_blank" rel="noopener noreferrer">Watch me play ↗</a>
+          <p class="poly__piano-credit mono">MIDI: B. Krüger · piano-midi.de (CC BY-SA) · composition public domain</p>
+        </div>
+      </div>
+
       <div class="poly__grid">
         {POLYMATH.map((p, i) => (
           <article class="card ticks poly__card" data-reveal data-reveal-delay={i * 70}>
@@ -117,6 +200,10 @@ const courseScene: Record<string, string> = {
           <div class="curio__scene"><Scene name="threebody" /></div>
           <p class="curio__cap">The three-body problem — chasing conserved quantities in deterministic chaos.</p>
         </article>
+        <article class="curio__tile card ticks" data-reveal data-reveal-delay="240">
+          <div class="curio__scene"><Scene name="fourier" /></div>
+          <p class="curio__cap">Sums of sines — turning prime numbers into music, and signal out of noise.</p>
+        </article>
       </div>
     </div>
   </section>
@@ -126,7 +213,7 @@ const courseScene: Record<string, string> = {
     <div class="wrap">
       <header class="sec-head">
         <p class="eyebrow" data-reveal>Foundations</p>
-        <h2 class="display sec-title" data-reveal>What I’ve studied.</h2>
+        <h2 class="display sec-title" data-reveal>The fields I<br/>think in.</h2>
       </header>
       <div class="course__grid">
         {Object.entries(COURSEWORK).map(([area, items], i) => (
@@ -169,11 +256,35 @@ const courseScene: Record<string, string> = {
   .protein-feature__sub { max-width: 42ch; }
 
   /* curiosities */
-  .curio__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .curio__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
   .curio__tile { padding: 0; overflow: hidden; }
-  .curio__scene { height: 300px; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
+  .curio__scene { height: 280px; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
+  /* let the embedded host fill the tile rather than overflow it */
+  .curio__scene :global(.scene-host) { height: 100%; min-height: 0; }
   .curio__cap { padding: 1rem 1.4rem 1.4rem; font-size: 0.92rem; color: var(--ink-dim); }
-  @media (max-width: 760px) { .curio__grid { grid-template-columns: 1fr; } }
+  @media (max-width: 980px) { .curio__grid { grid-template-columns: 1fr 1fr; } }
+  @media (max-width: 640px) { .curio__grid { grid-template-columns: 1fr; } }
+
+  /* research & lab */
+  .lab__intro { max-width: 60ch; margin-top: 1rem; }
+  .lab__rows { display: flex; flex-direction: column; gap: 2.5rem; margin-top: 2.5rem; }
+  .lab__row { display: grid; grid-template-columns: 1.1fr 1fr; gap: 2.5rem; align-items: center; }
+  .lab__row--alt { direction: rtl; }
+  .lab__row--alt > * { direction: ltr; }
+  .lab__scene {
+    height: 340px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    background: radial-gradient(circle at 50% 45%, rgba(0,153,255,0.07), transparent 70%);
+  }
+  /* enforce the inner host fills the box (no clipping of the animation) */
+  .lab__scene :global(.scene-host) { height: 100%; min-height: 0; }
+  .lab__eyebrow { color: var(--cyan); }
+  .lab__title { font-size: clamp(1.6rem, 1.2rem + 2vw, 2.6rem); margin: 0.5rem 0 1rem; }
+  .lab__body { font-size: 1.02rem; line-height: 1.7; color: #c2cce0; }
+  .lab__stat { display: inline-block; margin-top: 1rem; color: var(--amber); font-size: 0.85rem;
+    border: 1px solid var(--line); border-radius: 999px; padding: 0.35rem 0.9rem; }
+  @media (max-width: 760px) {
+    .lab__row, .lab__row--alt { grid-template-columns: 1fr; direction: ltr; gap: 1.2rem; }
+  }
 
   /* polymath */
   .poly__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
@@ -184,9 +295,28 @@ const courseScene: Record<string, string> = {
   .poly__lines li { font-size: 0.94rem; color: #c2cce0; }
   .poly__lines li::marker { color: var(--cyan); }
 
+  /* polymath — featured piano */
+  .poly__piano { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.5rem; align-items: center;
+    margin-bottom: 1.6rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
+    background: radial-gradient(circle at 28% 40%, rgba(0,153,255,0.08), transparent 70%); }
+  .poly__piano-scene { height: 420px; min-width: 0; }
+  .poly__piano-scene :global(.scene-host) { height: 100%; min-height: 0; }
+  .poly__piano-cap { padding: 1.6rem 1.8rem 1.6rem 0; }
+  .poly__piano-title { font-size: clamp(1.5rem, 1.2rem + 1.8vw, 2.4rem); margin: 0.4rem 0 0.8rem; }
+  .poly__piano-sub { font-size: 1rem; line-height: 1.7; color: #c2cce0; max-width: 44ch; }
+  .poly__piano-link { margin-top: 1.1rem; }
+  .poly__piano-credit { margin-top: 1.1rem; font-size: 0.64rem; color: var(--ink-faint); letter-spacing: 0.03em; }
+  @media (max-width: 760px) {
+    .poly__piano { grid-template-columns: 1fr; }
+    .poly__piano-scene { height: 320px; }
+    .poly__piano-cap { padding: 0 1.4rem 1.4rem; }
+  }
+
   /* coursework */
   .course__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2rem; }
-  .course__scene { height: 150px; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
+  .course__scene { height: 240px; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
+  /* the embedded scene host enforces min-height:240px; let it fill (not overflow) this box */
+  .course__scene :global(.scene-host) { height: 100%; min-height: 0; }
   .course__area { color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.08em; padding-bottom: 0.8rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
   .course__col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
   .course__col li { font-size: 0.92rem; color: var(--ink-dim); padding-left: 1rem; position: relative; }

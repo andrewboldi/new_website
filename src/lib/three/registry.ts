@@ -7,7 +7,9 @@ import { mount, type CreateSceneOpts } from './core';
 export type SceneName =
   | 'network' | 'molecule' | 'protein' | 'density' | 'landscape'
   | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice'
-  | 'threebody' | 'rubiks';
+  | 'threebody' | 'rubiks'
+  | 'routegraph' | 'chromatography' | 'massspec' | 'gradientdescent' | 'fourier'
+  | 'piano';
 
 type BloomOpts = NonNullable<CreateSceneOpts['bloom']>;
 
@@ -25,6 +27,12 @@ const BLOOM: Record<SceneName, BloomOpts> = {
   lattice: { strength: 0.6, radius: 0.5, threshold: 0.07 },
   threebody: { strength: 0.7, radius: 0.6, threshold: 0.05 },
   rubiks: { strength: 0.15, radius: 0.4, threshold: 0.6 },
+  routegraph: { strength: 0.85, radius: 0.6, threshold: 0.04 },
+  chromatography: { strength: 0.5, radius: 0.55, threshold: 0.15 },
+  massspec: { strength: 0.9, radius: 0.6, threshold: 0.02 },
+  gradientdescent: { strength: 0.45, radius: 0.5, threshold: 0.18 },
+  fourier: { strength: 0.85, radius: 0.6, threshold: 0.03 },
+  piano: { strength: 0.5, radius: 0.5, threshold: 0.15 },
 };
 
 export async function mountScene(
@@ -73,6 +81,30 @@ export async function mountScene(
     case 'rubiks': {
       const { rubiksCube } = await import('./RubiksCube');
       return mount(host, (h) => rubiksCube(h), { bloom });
+    }
+    case 'routegraph': {
+      const { routeGraph } = await import('./RouteGraph');
+      return mount(host, (h) => routeGraph(h), { bloom });
+    }
+    case 'chromatography': {
+      const { chromatography } = await import('./Chromatography');
+      return mount(host, (h) => chromatography(h), { bloom });
+    }
+    case 'massspec': {
+      const { massSpec } = await import('./MassSpec');
+      return mount(host, (h) => massSpec(h), { bloom });
+    }
+    case 'gradientdescent': {
+      const { gradientDescent } = await import('./GradientDescent');
+      return mount(host, (h) => gradientDescent(h), { bloom });
+    }
+    case 'fourier': {
+      const { fourier } = await import('./Fourier');
+      return mount(host, (h) => fourier(h), { bloom });
+    }
+    case 'piano': {
+      const { piano } = await import('./Piano');
+      return mount(host, (h) => piano(h), { bloom, alpha: false });
     }
     case 'orbital':
     case 'helix':

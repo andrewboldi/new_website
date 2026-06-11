@@ -1,0 +1,199 @@
+---
+// Global decorative border artifacts — subtle instrument framing pinned to the
+// viewport edges. Injected ONCE in Base.astro. Purely decorative: fixed,
+// pointer-events:none, low opacity, sits BEHIND content (z-index 0, above the
+// bg canvas region but never intercepts clicks). Honors prefers-reduced-motion
+// and never causes horizontal scroll or layout shift (uses inset edges + clip).
+//
+// Aesthetic: dark "inside a simulation" — corner registration marks, a left
+// rail with tick marks + rotated mono microtext (aspirin SMILES), a right-edge
+// ruler, hairline top/bottom rules, and a few static scientific glyphs.
+
+// Aspirin (acetylsalicylic acid) — a quiet nod to the molecular theme.
+const SMILES = 'CC(=O)Oc1ccccc1C(=O)O';
+// Left-rail tick labels (faux instrument scale).
+const railTicks = ['00', '01', '02', '03', '04', '05', '06', '07', '08'];
+// Right-edge ruler labels.
+const ruler = Array.from({ length: 11 }, (_, i) => i);
+---
+
+<div class="bartifacts" aria-hidden="true">
+  <!-- four corner registration marks (L-brackets) -->
+  <span class="ba-corner ba-corner--tl"></span>
+  <span class="ba-corner ba-corner--tr"></span>
+  <span class="ba-corner ba-corner--bl"></span>
+  <span class="ba-corner ba-corner--br"></span>
+
+  <!-- top + bottom hairline rules -->
+  <span class="ba-hair ba-hair--top"></span>
+  <span class="ba-hair ba-hair--bottom"></span>
+
+  <!-- left vertical rail: ticks + rotated mono microtext -->
+  <div class="ba-rail">
+    <div class="ba-rail__ticks">
+      {railTicks.map((t) => (
+        <span class="ba-rail__tick"><i></i><b class="mono">{t}</b></span>
+      ))}
+    </div>
+    <span class="ba-rail__smiles mono">{SMILES}</span>
+  </div>
+
+  <!-- right vertical ruler strip -->
+  <div class="ba-ruler">
+    {ruler.map((n) => (
+      <span class={`ba-ruler__mark${n % 5 === 0 ? ' is-major' : ''}`}>
+        {n % 5 === 0 && <b class="mono">{n * 10}</b>}
+      </span>
+    ))}
+  </div>
+
+  <!-- static scientific glyphs in the margins -->
+  <span class="ba-glyph ba-glyph--benzene mono">⌬</span>
+  <span class="ba-glyph ba-glyph--hex mono">⎔</span>
+  <span class="ba-glyph ba-glyph--coord mono">N 48.85° · E 2.35°</span>
+
+  <!-- very-light drifting particles in the side margins (CSS-only) -->
+  <div class="ba-motes ba-motes--left">
+    <i style="--d:0s;   --x:6px;  --t:19s"></i>
+    <i style="--d:-6s;  --x:14px; --t:23s"></i>
+    <i style="--d:-12s; --x:3px;  --t:27s"></i>
+  </div>
+  <div class="ba-motes ba-motes--right">
+    <i style="--d:-3s;  --x:10px; --t:21s"></i>
+    <i style="--d:-9s;  --x:4px;  --t:25s"></i>
+  </div>
+</div>
+
+<style>
+  /* container clips anything that could nudge the edge, so it can never create
+     a horizontal scrollbar regardless of viewport width. */
+  .bartifacts {
+    position: fixed;
+    inset: 0;
+    z-index: 0;            /* above bg canvas region, below content (z:1) */
+    pointer-events: none;  /* never blocks clicks */
+    overflow: hidden;
+    contain: strict;       /* isolate paint; no layout influence on the page */
+  }
+
+  /* ---------- corner registration marks ---------- */
+  .ba-corner {
+    position: absolute;
+    width: 22px; height: 22px;
+    opacity: 0.32;
+    border-color: var(--cyan);
+  }
+  .ba-corner--tl { top: 14px;    left: 14px;    border-top: 1px solid; border-left: 1px solid; }
+  .ba-corner--tr { top: 14px;    right: 14px;   border-top: 1px solid; border-right: 1px solid; }
+  .ba-corner--bl { bottom: 14px; left: 14px;    border-bottom: 1px solid; border-left: 1px solid; }
+  .ba-corner--br { bottom: 14px; right: 14px;   border-bottom: 1px solid; border-right: 1px solid; }
+  /* a tiny crosshair dot at each corner's inner elbow */
+  .ba-corner::after {
+    content: ''; position: absolute; width: 3px; height: 3px; border-radius: 50%;
+    background: var(--cyan); opacity: 0.7;
+  }
+  .ba-corner--tl::after { top: -2px;    left: -2px; }
+  .ba-corner--tr::after { top: -2px;    right: -2px; }
+  .ba-corner--bl::after { bottom: -2px; left: -2px; }
+  .ba-corner--br::after { bottom: -2px; right: -2px; }
+
+  /* ---------- top/bottom hairline rules ---------- */
+  .ba-hair {
+    position: absolute; left: 56px; right: 56px; height: 1px;
+    background: linear-gradient(90deg, transparent, var(--line-2) 12%, var(--line-2) 88%, transparent);
+    opacity: 0.5;
+  }
+  .ba-hair--top    { top: 24px; }
+  .ba-hair--bottom { bottom: 24px; }
+
+  /* ---------- left vertical rail ---------- */
+  .ba-rail {
+    position: absolute; top: 0; bottom: 0; left: 0;
+    width: 30px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .ba-rail__ticks {
+    display: flex; flex-direction: column; gap: clamp(1.4rem, 5vh, 2.6rem);
+    align-items: flex-start;
+  }
+  .ba-rail__tick { display: flex; align-items: center; gap: 5px; opacity: 0.3; }
+  .ba-rail__tick i { display: block; width: 7px; height: 1px; background: var(--ink-dim); }
+  .ba-rail__tick b {
+    font-weight: 400; font-size: 0.5rem; letter-spacing: 0.06em; color: var(--ink-faint);
+  }
+  .ba-rail__smiles {
+    position: absolute; left: 8px; top: 50%;
+    transform: translateY(-50%) rotate(180deg);
+    writing-mode: vertical-rl;
+    font-size: 0.58rem; letter-spacing: 0.22em;
+    color: var(--ink-faint); opacity: 0.38; white-space: nowrap;
+  }
+
+  /* ---------- right vertical ruler ---------- */
+  .ba-ruler {
+    position: absolute; top: 0; bottom: 0; right: 12px;
+    display: flex; flex-direction: column; align-items: flex-end;
+    justify-content: center; gap: clamp(0.7rem, 2.2vh, 1.2rem);
+  }
+  .ba-ruler__mark {
+    position: relative; display: flex; align-items: center; gap: 6px;
+    opacity: 0.28;
+  }
+  .ba-ruler__mark::after {
+    content: ''; display: block; width: 8px; height: 1px; background: var(--ink-dim);
+  }
+  .ba-ruler__mark.is-major { opacity: 0.42; }
+  .ba-ruler__mark.is-major::after { width: 14px; background: var(--cyan); }
+  .ba-ruler__mark b {
+    font-weight: 400; font-size: 0.5rem; letter-spacing: 0.04em; color: var(--ink-faint);
+  }
+
+  /* ---------- static scientific glyphs ---------- */
+  .ba-glyph { position: absolute; color: var(--ink-dim); opacity: 0.22; user-select: none; }
+  .ba-glyph--benzene { top: 30%;  left: 40px; font-size: 1.05rem; color: var(--cyan); opacity: 0.2; }
+  .ba-glyph--hex     { bottom: 28%; right: 44px; font-size: 0.95rem; }
+  .ba-glyph--coord {
+    bottom: 50px; right: 18px;
+    writing-mode: vertical-rl; transform: rotate(180deg);
+    font-size: 0.52rem; letter-spacing: 0.18em; opacity: 0.26;
+  }
+
+  /* ---------- drifting motes (CSS-only, side margins) ---------- */
+  .ba-motes { position: absolute; top: 0; bottom: 0; width: 40px; }
+  .ba-motes--left  { left: 0; }
+  .ba-motes--right { right: 0; }
+  .ba-motes i {
+    position: absolute; bottom: -8px; left: 50%;
+    width: 2px; height: 2px; border-radius: 50%;
+    background: var(--cyan);
+    box-shadow: 0 0 6px rgba(56, 232, 200, 0.5);
+    opacity: 0;
+    animation: ba-float var(--t, 22s) linear infinite;
+    animation-delay: var(--d, 0s);
+    will-change: transform, opacity;
+  }
+  @keyframes ba-float {
+    0%   { transform: translate(-50%, 0) translateX(0);              opacity: 0; }
+    10%  { opacity: 0.45; }
+    90%  { opacity: 0.45; }
+    100% { transform: translate(-50%, -100vh) translateX(var(--x, 8px)); opacity: 0; }
+  }
+
+  /* ---------- responsive: keep it clean on small screens ---------- */
+  @media (max-width: 760px) {
+    /* drop the busiest pieces; keep corners + a faint hairline for framing */
+    .ba-rail, .ba-ruler, .ba-motes,
+    .ba-glyph--benzene, .ba-glyph--hex, .ba-glyph--coord { display: none; }
+    .ba-corner { width: 16px; height: 16px; opacity: 0.26; }
+    .ba-corner--tl, .ba-corner--tr { top: 10px; }
+    .ba-corner--bl, .ba-corner--br { bottom: 10px; }
+    .ba-corner--tl, .ba-corner--bl { left: 10px; }
+    .ba-corner--tr, .ba-corner--br { right: 10px; }
+    .ba-hair { left: 30px; right: 30px; }
+  }
+
+  /* ---------- reduced motion: no drift ---------- */
+  @media (prefers-reduced-motion: reduce) {
+    .ba-motes { display: none; }
+  }
+</style>

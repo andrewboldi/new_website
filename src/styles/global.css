@@ -235,3 +235,81 @@ p a:hover, .prose a:hover { background-size: 100% 1px; color: var(--cyan-soft); 
 .faint { color: var(--ink-faint); }
 .nowrap { white-space: nowrap; }
 .sr-only { position:absolute; width:1px; height:1px; padding:0; margin:-1px; overflow:hidden; clip:rect(0,0,0,0); border:0; }
+
+/* ============================================================
+   Global polish & micro-interactions (additive)
+   ============================================================ */
+
+/* ---------- accessible focus rings ---------- */
+/* Quiet by default (no ring on mouse), crisp cyan ring on keyboard focus. */
+:focus { outline: none; }
+:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+/* pill/round controls get a softer, fitted ring */
+.btn:focus-visible, .tag:focus-visible, a.btn:focus-visible {
+  outline-offset: 4px;
+  border-radius: 100px;
+}
+
+/* ---------- text-selection across the rest of the UI ---------- */
+/* (base ::selection is defined above; this softens it for headings/mono) */
+.display::selection, .mono::selection,
+h1::selection, h2::selection, h3::selection {
+  background: rgba(56, 232, 200, 0.26); color: #fff;
+}
+
+/* ---------- anchor targets clear the fixed nav ---------- */
+:where(h1, h2, h3, h4, section, [id]):target { scroll-margin-top: 6rem; }
+[id] { scroll-margin-top: 6rem; }
+
+/* ---------- slim custom scrollbar ---------- */
+html { scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: linear-gradient(var(--line-2), var(--line-2)) padding-box;
+  border: 2px solid transparent;
+  border-radius: 100px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: linear-gradient(rgba(56,232,200,0.5), rgba(0,153,255,0.5)) padding-box;
+}
+
+/* ---------- refined heading wrapping ---------- */
+h1, h2, h3, .display, .eyebrow { text-wrap: balance; }
+p, li { text-wrap: pretty; }
+
+/* ---------- tap highlight + touch tidy-ups ---------- */
+* { -webkit-tap-highlight-color: rgba(56, 232, 200, 0.18); }
+a, button, .btn, .tag, [role="button"] { -webkit-tap-highlight-color: transparent; }
+button, [role="button"] { touch-action: manipulation; }
+
+/* ---------- a reusable animated link underline ---------- */
+/* opt-in via .link-underline; mirrors the prose-link feel without touching it */
+.link-underline {
+  background-image: linear-gradient(var(--cyan), var(--cyan));
+  background-size: 0% 1px; background-repeat: no-repeat; background-position: 0 100%;
+  transition: background-size 0.4s var(--ease), color 0.3s;
+}
+.link-underline:hover, .link-underline:focus-visible { background-size: 100% 1px; color: var(--cyan-soft); }
+
+/* ---------- media defaults ---------- */
+img, svg, video, canvas { max-width: 100%; }
+img, video { height: auto; }
+
+/* ---------- print stylesheet ---------- */
+@media print {
+  :root { --bg: #fff; --ink: #111; }
+  html, body { background: #fff !important; color: #111 !important; }
+  body::before, body::after,
+  .bartifacts, .bg-field, .field-tag, .cursor, .scrollbar,
+  .totop, .help-fab, .cmdk, .help, .toast, .cubefx, .nav__toggle { display: none !important; }
+  .page-body { background: none !important; }
+  .page-body .display, .page-body h1, .page-body h2 { text-shadow: none !important; }
+  a { color: #111 !important; text-decoration: underline; }
+  .section { padding-block: 1.2rem; }
+  * { box-shadow: none !important; }
+}

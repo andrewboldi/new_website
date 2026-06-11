@@ -1,0 +1,57 @@
+---
+/**
+ * Subtle keyboard-hint chip. Surfaces the site-wide shortcuts that already live
+ * in SiteFeatures (the ? help overlay and the ⌘K / "/" command palette). The
+ * buttons dispatch the same keydown events SiteFeatures already listens for, so
+ * there is no duplicated logic — this is purely an affordance.
+ */
+---
+
+<div class="hintchip" data-h="5" role="group" aria-label="Keyboard shortcuts">
+  <button type="button" class="hintchip__btn" data-hint="help" aria-label="Open keyboard shortcuts">
+    <kbd>?</kbd><span class="hintchip__txt">shortcuts</span>
+  </button>
+  <span class="hintchip__sep" aria-hidden="true"></span>
+  <button type="button" class="hintchip__btn" data-hint="cmdk" aria-label="Open command palette">
+    <kbd>⌘</kbd><kbd>K</kbd><span class="hintchip__txt">jump anywhere</span>
+  </button>
+</div>
+
+<style>
+  .hintchip {
+    display: inline-flex; align-items: center; gap: 0.7rem; margin-top: 2rem;
+    padding: 0.4rem 0.55rem; border-radius: 100px;
+    border: 1px solid var(--line); background: rgba(9,12,22,0.4);
+    width: fit-content;
+  }
+  .hintchip__btn {
+    display: inline-flex; align-items: center; gap: 0.4rem;
+    background: none; border: 0; cursor: pointer; padding: 0.2rem 0.4rem;
+    color: var(--ink-dim); font-family: var(--mono); font-size: 0.72rem;
+    letter-spacing: 0.04em; transition: color 0.3s var(--ease);
+  }
+  .hintchip__btn:hover { color: var(--cyan); }
+  .hintchip__txt { letter-spacing: 0.08em; }
+  .hintchip kbd {
+    display: inline-block; padding: 0.1em 0.42em; border: 1px solid var(--line-2);
+    border-radius: 6px; background: rgba(255,255,255,0.03); color: var(--ink);
+    font-family: var(--mono); font-size: 0.72rem; line-height: 1.4;
+  }
+  .hintchip__btn:hover kbd { border-color: var(--cyan); }
+  .hintchip__sep { width: 1px; height: 16px; background: var(--line-2); }
+  @media (max-width: 480px) { .hintchip__txt { display: none; } }
+</style>
+
+<script>
+  // Re-use the global shortcuts wired in SiteFeatures by dispatching the very
+  // keydown events it already listens for. No duplicated palette/help logic.
+  const fire = (init: KeyboardEventInit) =>
+    window.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init }));
+
+  document.querySelectorAll<HTMLButtonElement>('.hintchip__btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      if (btn.dataset.hint === 'help') fire({ key: '?' });
+      else fire({ key: 'k', metaKey: true });
+    });
+  });
+</script>

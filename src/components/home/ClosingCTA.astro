@@ -1,0 +1,74 @@
+---
+/**
+ * Closing call-to-action above the footer. Three clear next steps (read about,
+ * see the work, get in touch) presented as floating pathway links over the
+ * field — joined by a soft gradient, never a hard box. Replaces the old
+ * email-only contact section with something with more pull.
+ */
+import { SITE, url } from '@/lib/site';
+
+const paths = [
+  { eyebrow: 'Who I am', title: 'The long story', detail: 'Background, the throughline, beyond the lab.', href: url('/about'), accent: 'blue', cta: 'Read about me' },
+  { eyebrow: 'What I build', title: 'Selected work', detail: 'Research, tools, and things I figured out.', href: url('/work'), accent: 'cyan', cta: 'See the work' },
+];
+---
+
+<section class="closer" aria-label="Get in touch">
+  <div class="wrap">
+    <p class="eyebrow center" data-reveal>What’s next</p>
+    <h2 class="display closer__title center" data-reveal>Let’s build something<br/>that matters.</h2>
+
+    <div class="closer__paths">
+      {paths.map((p, i) => (
+        <a class={`closer__path closer__path--${p.accent}`} href={p.href} data-reveal data-reveal-delay={i * 90}>
+          <span class="closer__path-eyebrow mono">{p.eyebrow}</span>
+          <span class="closer__path-title display">{p.title}</span>
+          <span class="closer__path-detail muted">{p.detail}</span>
+          <span class="closer__path-cta mono">{p.cta} <span class="closer__arrow" aria-hidden="true">→</span></span>
+        </a>
+      ))}
+    </div>
+
+    <div class="closer__mail center" data-reveal>
+      <span class="closer__mail-label mono">or just say hello</span>
+      <a class="btn btn--solid closer__btn" href={`mailto:${SITE.email}`}>{SITE.email}</a>
+    </div>
+  </div>
+</section>
+
+<style>
+  /* extra bottom padding pulls the eye down into the footer with no hard seam */
+  .closer { padding-block: clamp(5rem, 13vh, 9rem) clamp(3rem, 8vh, 6rem); position: relative; }
+  .closer__title { font-size: clamp(2.2rem, 1.6rem + 4vw, 4.6rem); margin: 0.8rem 0 0; }
+
+  .closer__paths {
+    display: grid; grid-template-columns: 1fr 1fr; gap: 1px; background: var(--line);
+    border-radius: var(--radius); overflow: hidden;
+    margin: clamp(2.4rem, 5vh, 3.6rem) auto 0; max-width: 900px;
+  }
+  .closer__path {
+    display: flex; flex-direction: column; gap: 0.5rem;
+    padding: clamp(1.6rem, 4vw, 2.4rem);
+    background: linear-gradient(180deg, rgba(9,12,22,0.6), rgba(6,8,15,0.74));
+    transition: background 0.5s var(--ease);
+  }
+  .closer__path-eyebrow { font-size: 0.68rem; letter-spacing: 0.22em; text-transform: uppercase; color: var(--cyan); }
+  .closer__path--blue .closer__path-eyebrow { color: var(--blue-soft); }
+  .closer__path-title { font-size: clamp(1.5rem, 1.2rem + 1.4vw, 2.2rem); }
+  .closer__path-detail { font-size: 0.92rem; max-width: 30ch; }
+  .closer__path-cta { margin-top: 0.5rem; font-size: 0.76rem; letter-spacing: 0.04em; color: var(--ink); display: inline-flex; align-items: center; gap: 0.5rem; }
+  .closer__arrow { transition: transform 0.4s var(--ease); }
+  .closer__path:hover { background: linear-gradient(180deg, rgba(0,153,255,0.10), rgba(6,8,15,0.74)); }
+  .closer__path--cyan:hover { background: linear-gradient(180deg, rgba(56,232,200,0.10), rgba(6,8,15,0.74)); }
+  .closer__path:hover .closer__arrow { transform: translateX(5px); }
+  .closer__path:hover .closer__path-title { color: var(--cyan-soft); }
+  .closer__path--blue:hover .closer__path-title { color: var(--blue-soft); }
+
+  .closer__mail { margin-top: clamp(2.4rem, 5vh, 3.4rem); display: flex; flex-direction: column; align-items: center; gap: 0.9rem; }
+  .closer__mail-label { font-size: 0.72rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
+  .closer__btn { font-size: 0.95rem; }
+
+  @media (max-width: 680px) {
+    .closer__paths { grid-template-columns: 1fr; }
+  }
+</style>

@@ -33,6 +33,28 @@ const cmds = [
 <!-- toast -->
 <div class="toast" id="toast" aria-live="polite"></div>
 
+<!-- shortcuts & secrets help -->
+<button class="help-fab" id="help-fab" aria-label="Keyboard shortcuts & secrets" title="Shortcuts & secrets (press ?)">?</button>
+<div class="help" id="help" hidden>
+  <div class="help__backdrop" data-help-close></div>
+  <div class="help__panel" role="dialog" aria-modal="true" aria-label="Keyboard shortcuts & secrets">
+    <div class="help__head">
+      <p class="help__title">Shortcuts &amp; secrets</p>
+      <button class="help__x" id="help-x" aria-label="Close" data-help-close>✕</button>
+    </div>
+    <ul class="help__list">
+      <li><span class="help__keys"><kbd>⌘</kbd>/<kbd>Ctrl</kbd><kbd>K</kbd></span><span class="help__desc">Open the command palette</span></li>
+      <li><span class="help__keys"><kbd>/</kbd></span><span class="help__desc">Open the command palette</span></li>
+      <li><span class="help__keys"><kbd>g</kbd> then <kbd>h</kbd>/<kbd>a</kbd>/<kbd>w</kbd>/<kbd>l</kbd>/<kbd>n</kbd></span><span class="help__desc">Jump to Home, About, Work, Library, Now</span></li>
+      <li><span class="help__keys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="help__desc">Play a note (Andrew’s a pianist)</span></li>
+      <li><span class="help__keys">type <kbd>cube</kbd></span><span class="help__desc">Solve a Rubik’s cube</span></li>
+      <li><span class="help__keys">↑↑↓↓←→←→<kbd>b</kbd><kbd>a</kbd></span><span class="help__desc">The Konami code — try it</span></li>
+      <li><span class="help__keys"><kbd>?</kbd></span><span class="help__desc">Open this help</span></li>
+    </ul>
+    <div class="help__foot mono"><kbd>esc</kbd> close</div>
+  </div>
+</div>
+
 <style>
   .scrollbar { position: fixed; top: 0; left: 0; height: 2px; width: 0; z-index: 120; background: linear-gradient(90deg, var(--blue), var(--cyan)); box-shadow: 0 0 10px var(--cyan); transition: width 0.1s linear; }
   .totop { position: fixed; bottom: 1.4rem; right: 1.4rem; z-index: 90; width: 42px; height: 42px; border-radius: 50%; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(8px); color: var(--ink); cursor: pointer; opacity: 0; transform: translateY(10px); transition: opacity 0.4s var(--ease), transform 0.4s var(--ease), border-color 0.3s; }
@@ -57,6 +79,26 @@ const cmds = [
   .toast { position: fixed; bottom: 1.6rem; left: 50%; transform: translateX(-50%) translateY(20px); z-index: 310; padding: 0.7rem 1.2rem; border-radius: 100px; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--bg) 80%, transparent); backdrop-filter: blur(10px); color: var(--ink); font-size: 0.85rem; opacity: 0; pointer-events: none; transition: opacity 0.4s var(--ease), transform 0.4s var(--ease); }
   .toast.show { opacity: 1; transform: translateX(-50%); }
   @media (max-width: 560px) { .totop { display: none; } }
+
+  /* shortcuts & secrets — reuses the cmdk panel language */
+  .help-fab { position: fixed; bottom: 1.4rem; left: 1.4rem; z-index: 90; width: 34px; height: 34px; border-radius: 50%; border: 1px solid var(--line-2); background: color-mix(in srgb, var(--bg) 70%, transparent); backdrop-filter: blur(8px); color: var(--ink-dim); font-family: var(--mono); font-size: 0.95rem; cursor: pointer; opacity: 0.6; transition: opacity 0.3s var(--ease), border-color 0.3s, color 0.3s; }
+  .help-fab:hover { opacity: 1; border-color: var(--cyan); color: var(--cyan); }
+  .help { position: fixed; inset: 0; z-index: 300; display: grid; place-items: center; padding: 1.2rem; }
+  .help[hidden] { display: none; }
+  .help__backdrop { position: absolute; inset: 0; background: rgba(4,6,12,0.6); backdrop-filter: blur(6px); }
+  .help__panel { position: relative; width: min(460px, 92vw); border: 1px solid var(--line-2); border-radius: 14px; overflow: hidden; background: linear-gradient(180deg, var(--surface), var(--bg-2)); box-shadow: 0 40px 100px -30px #000; animation: cmdkin 0.3s var(--ease); }
+  .help__head { display: flex; justify-content: space-between; align-items: center; padding: 1rem 1.3rem; border-bottom: 1px solid var(--line); }
+  .help__title { font-family: var(--display); font-size: 1.1rem; }
+  .help__x { background: none; border: 0; color: var(--ink-faint); font-size: 0.85rem; cursor: pointer; transition: color 0.3s; }
+  .help__x:hover { color: var(--cyan); }
+  .help__list { list-style: none; margin: 0; padding: 0.6rem 0.9rem; display: flex; flex-direction: column; }
+  .help__list li { display: flex; justify-content: space-between; align-items: center; gap: 1.2rem; padding: 0.6rem 0.4rem; border-bottom: 1px solid var(--line); }
+  .help__list li:last-child { border-bottom: 0; }
+  .help__keys { display: inline-flex; align-items: center; gap: 0.25rem; flex-wrap: wrap; font-family: var(--mono); font-size: 0.74rem; color: var(--ink-dim); white-space: nowrap; }
+  .help__keys kbd { display: inline-block; padding: 0.12em 0.42em; border: 1px solid var(--line-2); border-radius: 6px; background: rgba(255,255,255,0.03); color: var(--ink); font-size: 0.92em; }
+  .help__desc { font-size: 0.86rem; color: var(--ink); text-align: right; }
+  .help__foot { padding: 0.6rem 1rem; border-top: 1px solid var(--line); font-size: 0.66rem; color: var(--ink-faint); }
+  .help__foot kbd { color: var(--ink-dim); }
 </style>
 
 <script>
@@ -80,6 +122,20 @@ const cmds = [
     toast.textContent = msg; toast.classList.add('show');
     clearTimeout(toastTimer); toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3200);
   };
+
+  // ---- shortcuts & secrets help overlay ----
+  const help = document.getElementById('help')!;
+  const helpFab = document.getElementById('help-fab')!;
+  const openHelp = () => { help.hidden = false; };
+  const closeHelp = () => { help.hidden = true; };
+  helpFab.addEventListener('click', () => (help.hidden ? openHelp() : closeHelp()));
+  help.querySelectorAll('[data-help-close]').forEach((b) => b.addEventListener('click', closeHelp));
+  addEventListener('keydown', (e) => {
+    const tag = (e.target as HTMLElement)?.tagName;
+    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return;
+    if (e.key === '?') { e.preventDefault(); help.hidden ? openHelp() : closeHelp(); }
+    else if (e.key === 'Escape' && !help.hidden) closeHelp();
+  });
 
   // ---- command palette ----
   const cmdk = document.getElementById('cmdk')!;
@@ -124,7 +180,7 @@ const cmds = [
   // ---- keyboard nav: press g then h/a/w/l ; '/' opens palette ----
   let gPending = false, gTimer: number | undefined;
   const NAVMAP: Record<string, string> = {
-    h: '/', a: '/about', w: '/work', l: '/bookshelf',
+    h: '/', a: '/about', w: '/work', l: '/bookshelf', n: '/now',
   };
   addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement)?.tagName;

@@ -8,7 +8,9 @@ import { url } from '@/lib/site';
 type SceneName =
   | 'network' | 'molecule' | 'protein' | 'density' | 'landscape'
   | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice'
-  | 'threebody' | 'rubiks';
+  | 'threebody' | 'rubiks'
+  | 'routegraph' | 'chromatography' | 'massspec' | 'gradientdescent' | 'fourier'
+  | 'piano';
 
 interface Props {
   name: SceneName;
@@ -35,6 +37,12 @@ const labels: Record<SceneName, string> = {
   lattice: 'A crystalline lattice of atoms.',
   threebody: 'Three masses orbiting under gravity, leaving glowing trails — the chaotic three-body problem.',
   rubiks: 'A Rubik’s cube turning its layers.',
+  routegraph: 'A retrosynthesis tree of molecules, with a solution route lighting up step by step.',
+  chromatography: 'A chromatography column separating a mixture into colored bands that elute over time.',
+  massspec: 'A mass spectrum being acquired — m/z peaks igniting as a detector sweeps across them.',
+  gradientdescent: 'A marker rolling downhill along the gradient of a glowing loss surface.',
+  fourier: 'Rotating phasors summing into a wave — the Fourier series of a square wave.',
+  piano: 'A glowing piano playing Chopin’s “Revolutionary” Étude — falling notes strike the keys in real time.',
 };
 ---
 

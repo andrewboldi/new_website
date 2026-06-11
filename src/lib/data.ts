@@ -127,11 +127,33 @@ export const EXPERIENCE: Experience[] = [
   },
 ];
 
+export type ProjectCategory =
+  | 'AI/ML'
+  | 'Chemistry'
+  | 'Physics'
+  | 'Tools'
+  | 'Music'
+  | 'Systems'
+  | 'Education';
+
 export interface Project {
   name: string;
   blurb: string;
+  /** broad category — drives the filter chips */
+  category: ProjectCategory;
   tags: string[];
+  /** the one punchy number worth remembering */
+  metric?: string;
+  /** primary language / stack, shown as a mono chip */
+  lang?: string;
+  /** key into the cardfx Canvas2D animation registry (src/lib/cardfx) */
+  anim?: string;
+  /** GitHub stars, when notable */
+  stars?: number;
+  /** canonical source link (repo / proposal) */
   link?: { href: string; label: string };
+  /** optional live/demo link, distinct from source */
+  live?: { href: string; label: string };
   year?: string;
   featured?: boolean;
 }
@@ -143,20 +165,26 @@ export const PROJECTS: Project[] = [
       'Predicting the direction of optical rotation for chiral molecules with a T-Net ' +
       'architecture — distilling 8M+ PubChem molecules to ~27K optically active ones, ' +
       'with DFT polarizability tensors (B3LYP/def2-SVP).',
+    category: 'Chemistry',
     tags: ['Machine Learning', 'Chirality', 'DFT', 'RDKit'],
+    metric: '8M → 27K molecules distilled',
+    lang: 'Python',
+    anim: 'molecule',
     link: { href: 'https://github.com/andrewboldi/Trennen', label: 'Trennen' },
     featured: true,
   },
   {
-    name: 'DRL for Total Synthesis',
+    name: 'AMC Trainer',
     blurb:
-      'A proposal to plan total-synthesis routes with deep reinforcement learning — ' +
-      'the bench meets the search tree.',
-    tags: ['Deep RL', 'Synthesis', 'Proposal'],
-    link: {
-      href: 'https://drive.google.com/file/d/1tb4FmbWa_kB-IzOSVxSBt1PZdDzaw_Iu/view',
-      label: 'Read proposal',
-    },
+      'An interactive math-competition trainer built with my brother Ethan — adaptive ' +
+      'AMC practice now used by 20K+ people across 50+ countries.',
+    category: 'Education',
+    tags: ['Web', 'Education', 'Cloudflare'],
+    metric: '20K+ users · 50+ countries',
+    lang: 'TypeScript',
+    anim: 'mathcomp',
+    link: { href: 'https://github.com/andrewboldi/AMC-Trainer', label: 'AMC-Trainer' },
+    live: { href: 'https://amctrainer.com', label: 'amctrainer.com' },
     featured: true,
   },
   {
@@ -165,85 +193,171 @@ export const PROJECTS: Project[] = [
       'A scenic-routing algorithm (modified A*) over San Mateo County — semantic ' +
       'segmentation of 250K+ Street View images on TPUs, with earth-curvature-aware ' +
       'heuristics and TIGER/Line road graphs.',
+    category: 'AI/ML',
     tags: ['Deep Learning', 'Computer Vision', 'Geospatial'],
+    metric: '250K+ Street View images segmented',
+    lang: 'Python',
+    anim: 'pathfind',
     link: { href: 'https://github.com/andrewboldi/Pathfinder', label: 'Pathfinder' },
     featured: true,
   },
   {
-    name: 'AMC Trainer',
+    name: 'fibprimes',
     blurb:
-      'An interactive math-competition trainer built with my brother — used by 20K+ ' +
-      'people across 50+ countries.',
-    tags: ['Web', 'Education', 'Cloudflare'],
-    link: { href: 'https://github.com/andrewboldi/AMC-Trainer', label: 'AMC Trainer' },
+      'A C program that turns the patterns of Fibonacci numbers and primes into MIDI ' +
+      'music. Reached the front page of Hacker News.',
+    category: 'Music',
+    tags: ['C', 'MIDI', 'Generative'],
+    metric: '~28 GitHub stars · hit Hacker News',
+    lang: 'C',
+    stars: 28,
+    anim: 'fibprimes',
+    link: { href: 'https://github.com/andrewboldi/fibprimes', label: 'fibprimes' },
+    featured: true,
+  },
+  {
+    name: 'DRL for Total Synthesis',
+    blurb:
+      'A proposal to plan total-synthesis routes with deep reinforcement learning — ' +
+      'the bench meets the search tree.',
+    category: 'Chemistry',
+    tags: ['Deep RL', 'Synthesis', 'Proposal'],
+    anim: 'gridworld',
+    link: {
+      href: 'https://drive.google.com/file/d/1tb4FmbWa_kB-IzOSVxSBt1PZdDzaw_Iu/view',
+      label: 'Read proposal',
+    },
   },
   {
     name: 'Pacman + Bitcoin Miner',
     blurb:
-      'A Pacman game with a built-in Bitcoin miner in 3000+ lines of Java — top 15 of ' +
-      '~1400 students in Berkeley’s CS61B.',
-    tags: ['Java', 'Games'],
+      'A Pacman game with a built-in Bitcoin miner in 3000+ lines of Java — placed top ' +
+      '15 of ~1400 students in Berkeley’s CS61B.',
+    category: 'AI/ML',
+    tags: ['Java', 'AI', 'Games'],
+    metric: 'Top 15 of ~1400 (Berkeley CS61B)',
+    lang: 'Java',
+    anim: 'mazehash',
     link: { href: 'https://www.youtube.com/watch?v=GyHNzA2-zqI', label: 'Video demo' },
-  },
-  {
-    name: 'fibprimes',
-    blurb:
-      'A C program that writes MIDI files from the patterns of Fibonacci and prime ' +
-      'numbers. Reached Hacker News.',
-    tags: ['C', 'MIDI', 'Music'],
-    link: { href: 'https://github.com/andrewboldi/fibprimes', label: 'fibprimes' },
   },
   {
     name: 'zipfai',
     blurb:
-      'A study of Zipf’s law across 200+ GB of text — all of Wikipedia, scraped ' +
-      'Project Gutenberg, and more.',
+      'A study of Zipf’s law across 200+ GB of text — all of Wikipedia, Project ' +
+      'Gutenberg, and more.',
+    category: 'AI/ML',
     tags: ['NLP', 'Data'],
+    metric: '200GB+ of text analyzed',
+    lang: 'Python',
+    anim: 'zipf',
     link: { href: 'https://github.com/andrewboldi/zipfai', label: 'zipfai' },
   },
   {
-    name: 'Polyphenols in Tea',
+    name: 'obsidian-vault-sync',
     blurb:
-      'Quantifying polyphenols in tea and kombucha with Fast Blue BB and a custom ' +
-      '3D-printed high-throughput cuvette plate.',
-    tags: ['Spectroscopy', 'Chemistry'],
-    link: { href: 'https://youtu.be/xdqA7C0FEdU', label: 'Video demo' },
+      'Streaming, REST-based GitHub sync for Obsidian that works on iOS for vaults of ' +
+      'any size, images included — fixing a long-standing crash in a popular plugin.',
+    category: 'Tools',
+    tags: ['TypeScript', 'iOS', 'Obsidian'],
+    metric: 'Fixes a long-standing iOS crash',
+    lang: 'TypeScript',
+    anim: 'notegraph',
+    link: { href: 'https://github.com/andrewboldi/obsidian-vault-sync', label: 'obsidian-vault-sync' },
+  },
+  {
+    name: 'thunderbird-mcp',
+    blurb:
+      'A Model Context Protocol server for Thunderbird — letting AI agents read, ' +
+      'search, and act on email through a clean tool interface.',
+    category: 'Tools',
+    tags: ['MCP', 'Email', 'Automation'],
+    metric: 'MCP server for Thunderbird email',
+    lang: 'TypeScript',
+    anim: 'packets',
+    link: { href: 'https://github.com/andrewboldi/thunderbird-mcp', label: 'thunderbird-mcp' },
+  },
+  {
+    name: 'Gas Town',
+    blurb:
+      'A multi-agent orchestrator that coordinates a fleet of LLM agents working ' +
+      'toward a shared goal — routing tasks, sharing state, and merging results.',
+    category: 'Systems',
+    tags: ['Agents', 'LLM', 'Orchestration'],
+    metric: 'Multi-agent orchestration',
+    lang: 'Python',
+    anim: 'agents',
+  },
+  {
+    name: 'Simple Bible Audio',
+    blurb:
+      'A clean, distraction-free Bible audio player built in Swift and shipped on the ' +
+      'App Store.',
+    category: 'Tools',
+    tags: ['Swift', 'iOS', 'Audio'],
+    metric: 'Shipped on the App Store',
+    lang: 'Swift',
+    anim: 'waveform',
   },
   {
     name: 'Three-Body Invariants',
     blurb:
       'Searching for conserved quantities in the chaotic three-body problem via ' +
       'automatic generation of candidate symbolic expressions.',
+    category: 'Physics',
     tags: ['Physics', 'Symbolic', 'Search'],
+    lang: 'Python',
+    anim: 'orbits',
     link: { href: 'https://github.com/andrewboldi/tbp', label: 'tbp' },
   },
   {
+    name: 'Polyphenols in Tea',
+    blurb:
+      'Quantifying polyphenols in tea and kombucha with Fast Blue BB and a custom ' +
+      '3D-printed high-throughput cuvette plate.',
+    category: 'Chemistry',
+    tags: ['Spectroscopy', 'Chemistry', '3D Printing'],
+    anim: 'molecule',
+    link: { href: 'https://youtu.be/xdqA7C0FEdU', label: 'Video demo' },
+  },
+  {
     name: 'Oscillations',
-    blurb: 'An interactive visualizer for damped harmonic oscillators — tune the damping and watch the phase portrait respond.',
+    blurb:
+      'An interactive visualizer for damped harmonic oscillators — tune the damping ' +
+      'and watch the phase portrait respond.',
+    category: 'Physics',
     tags: ['Physics', 'Visualization'],
+    lang: 'JavaScript',
+    anim: 'oscillator',
     link: { href: 'https://github.com/andrewboldi/oscillations', label: 'oscillations' },
   },
   {
     name: 'musalpha',
     blurb: 'Hear language as music — mapping the structure of text onto sound.',
+    category: 'Music',
     tags: ['Audio', 'Language'],
+    anim: 'waveform',
     link: { href: 'https://github.com/andrewboldi/musalpha', label: 'musalpha' },
   },
   {
     name: 'squanmate',
     blurb: 'A Square-1 trainer, solver, and analysis tool — for the speedcubing habit.',
+    category: 'Tools',
     tags: ['Puzzles', 'Algorithms'],
+    anim: 'puzzle',
     link: { href: 'https://github.com/andrewboldi/squanmate', label: 'squanmate' },
   },
-  {
-    name: 'Obsidian Vault Sync',
-    blurb:
-      'Streaming, REST-based GitHub sync for Obsidian that works on iOS for vaults of ' +
-      'any size, images included.',
-    tags: ['TypeScript', 'Tools'],
-    link: { href: 'https://github.com/andrewboldi/obsidian-vault-sync', label: 'obsidian-vault-sync' },
-  },
 ];
+
+/** Ordered, de-duplicated list of categories present in PROJECTS — for filter chips. */
+export const PROJECT_CATEGORIES: ProjectCategory[] = [
+  'AI/ML',
+  'Chemistry',
+  'Physics',
+  'Systems',
+  'Tools',
+  'Music',
+  'Education',
+].filter((c) => PROJECTS.some((p) => p.category === c)) as ProjectCategory[];
 
 export interface Polymath {
   title: string;

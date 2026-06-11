@@ -311,7 +311,10 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
       [paperEdge, spineMat, paperEdge, paperEdge, mk(new THREE.MeshBasicMaterial({ map: rTex })), coverPlain]);
     base.position.z = -Tc / 2; group.add(base);
     const cover = new THREE.Group();
-    cover.position.set(-W / 2, 0, Tb / 2);
+    // Seat the front cover flush against the base's front face so the closed
+    // spine reads as one continuous strip — no beige page block peeking through
+    // the seam. (A hair of overlap avoids z-fighting on the shared plane.)
+    cover.position.set(-W / 2, 0, Tb / 2 - Tc / 2 - 0.01);
     const coverMesh = new THREE.Mesh(new THREE.BoxGeometry(W, H, Tc),
       [paperEdge, spineMat, paperEdge, paperEdge, mk(new THREE.MeshBasicMaterial({ map: cTex })), mk(new THREE.MeshBasicMaterial({ map: lTex }))]);
     coverMesh.position.set(W / 2, 0, Tc / 2); cover.add(coverMesh); group.add(cover);
@@ -333,7 +336,9 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
         );
         group.rotation.y = THREE.MathUtils.lerp(Math.PI / 2, 0, present);
         group.scale.setScalar(THREE.MathUtils.lerp(1, R.bookScale, present));
-        cover.rotation.y = smoothstep(0.6, 1, p) * Math.PI;
+        // Open toward the reader: the front cover lifts up through +z and
+        // swings left over the spine hinge, revealing the right-hand page.
+        cover.rotation.y = smoothstep(0.6, 1, p) * -Math.PI;
       }
     };
     return { group, index, shelfPos: shelfPos.clone(), apply, dur: 3.4, kind: 'book', ref, textures, mats };
@@ -347,18 +352,23 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     const mk = (m: THREE.Material) => { mats.push(m); return m; };
     const ROLL = 5.2, Wp = 7, Hp = 11, rr = 0.55;
     const accent = new THREE.Color(w.accent || '#caa86a');
-    // closed roll
+    // closed roll. The wound paper + rings + ribbon live in an inner spin group
+    // so the roll can be laid horizontal (roll.rotation.z) and spun about its own
+    // long axis (rollSpin.rotation.y) independently while it rides down the sheet.
     const roll = new THREE.Group();
-    roll.add(new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, ROLL, 24), mk(new THREE.MeshStandardMaterial({ color: 0xe2d4a8, roughness: 0.85 }))));
+    const rollSpin = new THREE.Group();
+    rollSpin.add(new THREE.Mesh(new THREE.CylinderGeometry(rr, rr, ROLL, 24), mk(new THREE.MeshStandardMaterial({ color: 0xe2d4a8, roughness: 0.85 }))));
     const ringMat = mk(new THREE.MeshStandardMaterial({ color: 0xb6a373, roughness: 0.8 }));
     for (const yy of [ROLL / 2 - 0.12, -ROLL / 2 + 0.12]) {
       const ring = new THREE.Mesh(new THREE.CylinderGeometry(rr * 1.14, rr * 1.14, 0.26, 24), ringMat);
-      ring.position.y = yy; roll.add(ring);
+      ring.position.y = yy; rollSpin.add(ring);
     }
-    roll.add(new THREE.Mesh(new THREE.CylinderGeometry(rr * 1.05, rr * 1.05, 0.5, 24),
+    rollSpin.add(new THREE.Mesh(new THREE.CylinderGeometry(rr * 1.05, rr * 1.05, 0.5, 24),
       mk(new THREE.MeshStandardMaterial({ color: accent, roughness: 0.5, emissive: accent, emissiveIntensity: 0.18 }))));
+    roll.add(rollSpin);
     group.add(roll);
-    // unrolled sheet (hidden until opened)
+    // unrolled sheet (hidden until opened). The top edge is pinned to a fixed top
+    // rod; the sheet grows downward as the bottom roll rides down and unwinds.
     const sheetWrap = new THREE.Group();
     sheetWrap.position.y = ROLL / 2; sheetWrap.visible = false;
     const tex = scrollTexture(w); textures.push(tex);
@@ -369,8 +379,6 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     const sheet = new THREE.Mesh(planeGeo, mk(new THREE.MeshBasicMaterial({ map: tex, side: THREE.DoubleSide })));
     sheet.scale.y = 0.001; // rolled up — keep it out of the camera-fit bounding box
     sheetWrap.add(sheet);
-    const botRod = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, Wp + 0.7, 16), rodMat);
-    botRod.rotation.z = Math.PI / 2; sheetWrap.add(botRod);
     group.add(sheetWrap);
     // invisible proxy so the thin scroll is easy to click
     const proxy = new THREE.Mesh(new THREE.CylinderGeometry(1.3, 1.3, ROLL + 1.5, 8), mk(new THREE.MeshBasicMaterial({ visible: false })));
@@ -381,7 +389,11 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
       if (p < 0.002) {
         group.position.lerp(v.copy(shelfPos).setZ(isHot ? 2 : 0), 0.18);
         group.scale.setScalar(THREE.MathUtils.lerp(group.scale.x, isHot ? 1.06 : 1, 0.18));
+        // settle back to the closed, upright tube standing in its slot
         roll.visible = true; roll.scale.setScalar(THREE.MathUtils.lerp(roll.scale.x, 1, 0.2));
+        roll.rotation.z = THREE.MathUtils.lerp(roll.rotation.z, 0, 0.2);
+        roll.position.set(0, THREE.MathUtils.lerp(roll.position.y, 0, 0.2), 0);
+        rollSpin.rotation.y = 0;
         sheetWrap.visible = false;
       } else {
         const present = smoothstep(0.1, 0.55, p);
@@ -393,10 +405,17 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
           THREE.MathUtils.lerp(shelfPos.z, R.readZ, present) + Math.sin(smoothstep(0, 0.6, p) * Math.PI) * 3,
         );
         group.scale.setScalar(scale);
-        roll.scale.setScalar(Math.max(0.001, 1 - unroll)); roll.visible = unroll < 0.98;
+        // tip the tube from upright to a horizontal roll as it comes forward
+        roll.rotation.z = present * (Math.PI / 2);
         sheetWrap.visible = true;
+        // top edge pinned to the fixed top rod; sheet unfurls downward
         sheet.scale.y = Math.max(0.001, unroll);
-        botRod.position.y = -Hp * unroll;
+        // the wound roll rides down to the growing bottom edge, shrinks as paper
+        // transfers onto the flat sheet, and spins as if rolling it out
+        roll.visible = true;
+        roll.position.set(0, ROLL / 2 - Hp * unroll, rr * 1.1);
+        roll.scale.setScalar(THREE.MathUtils.lerp(1, 0.34, unroll));
+        rollSpin.rotation.y = unroll * Math.PI * 4;
       }
     };
     return { group, index, shelfPos: shelfPos.clone(), apply, dur: 4.6, kind: 'scroll', ref, textures, mats };

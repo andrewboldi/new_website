@@ -2,6 +2,11 @@
 import Base from '@/layouts/Base.astro';
 import MorphBackground from '@/components/MorphBackground.astro';
 import Stats from '@/components/Stats.astro';
+import RotatingTagline from '@/components/home/RotatingTagline.astro';
+import HintChip from '@/components/home/HintChip.astro';
+import Marquee from '@/components/home/Marquee.astro';
+import CurrentlyStrip from '@/components/home/CurrentlyStrip.astro';
+import ClosingCTA from '@/components/home/ClosingCTA.astro';
 import { SITE, SOCIALS, url } from '@/lib/site';
 import { FIELDS, PROJECTS } from '@/lib/data';
 import { getCollection } from 'astro:content';
@@ -33,6 +38,7 @@ try {
         I solve the hardest problems in science with computation — teaching machines
         the language of <em>molecules</em>, <em>proteins</em>, and <em>matter</em>.
       </p>
+      <RotatingTagline />
       <div class="hero__actions" data-h="4">
         <a class="btn btn--solid" href={url('/work')}>Selected work</a>
         <a class="btn" href={url('/about')}>Who I am</a>
@@ -42,6 +48,7 @@ try {
           <li><a href={s.href} target="_blank" rel="noopener noreferrer">{s.label}<span class="faint"> ↗</span></a></li>
         ))}
       </ul>
+      <HintChip />
     </div>
 
     <div class="hero__scroll" data-h="5" aria-hidden="true">
@@ -52,6 +59,9 @@ try {
   </section>
 
   <div class="page-body">
+    <!-- interests marquee — sets the tone, dissolves into the field -->
+    <Marquee />
+
     <!-- ================= CURRENTLY ================= -->
     <section class="section now">
       <div class="wrap">
@@ -63,6 +73,7 @@ try {
           Science at <span class="hl">UC&nbsp;Berkeley</span>.
         </p>
       </div>
+      <CurrentlyStrip />
     </section>
 
     <Stats />
@@ -144,14 +155,8 @@ try {
       </div>
     </section>
 
-    <!-- ================= CONTACT ================= -->
-    <section class="section contact">
-      <div class="wrap center">
-        <p class="eyebrow" data-reveal>Get in touch</p>
-        <h2 class="display contact__title" data-reveal>Let’s build something<br/>that matters.</h2>
-        <a class="btn btn--solid contact__btn" href={`mailto:${SITE.email}`} data-reveal>{SITE.email}</a>
-      </div>
-    </section>
+    <!-- ================= CLOSING CTA ================= -->
+    <ClosingCTA />
   </div>
 </Base>
 
@@ -255,11 +260,6 @@ try {
   .post-list__meta { font-size: 0.74rem; white-space: nowrap; }
   .split__books-blurb { margin: 0 0 1.6rem; max-width: 40ch; }
   .btn--ghost { width: fit-content; }
-
-  /* ---------- contact ---------- */
-  .contact { padding-block: clamp(6rem, 16vh, 11rem); }
-  .contact__title { font-size: clamp(2.4rem, 1.6rem + 4vw, 5rem); margin: 0.8rem 0 2.4rem; }
-  .contact__btn { font-size: 0.95rem; }
 
   @media (max-width: 760px) {
     .split__grid { grid-template-columns: 1fr; }

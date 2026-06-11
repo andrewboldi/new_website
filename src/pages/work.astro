@@ -3,7 +3,12 @@ import Base from '@/layouts/Base.astro';
 import PageHeader from '@/components/PageHeader.astro';
 import Scene from '@/components/Scene.astro';
 import MorphBackground from '@/components/MorphBackground.astro';
-import { EXPERIENCE, PROJECTS } from '@/lib/data';
+import { EXPERIENCE, PROJECTS, PROJECT_CATEGORIES } from '@/lib/data';
+
+const featured = PROJECTS.filter((p) => p.featured);
+const rest = PROJECTS.filter((p) => !p.featured);
+const ordered = [...featured, ...rest];
+const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
 ---
 
 <Base title="Work" description="Research, internships, and projects — from total synthesis at Caltech to molecular ML at Soley Therapeutics.">
@@ -19,6 +24,10 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
   <section class="section xp">
     <div class="wrap">
       <h2 class="sec-title display" data-reveal>Research &amp; work</h2>
+      <p class="sec-lede muted" data-reveal>
+        Three years at the bench in the Stoltz Lab at Caltech, then molecular machine
+        learning at Soley Therapeutics — chemistry from both sides of the screen.
+      </p>
       <div class="xp__list">
         {EXPERIENCE.map((e, i) => (
           <article class="xp__item" data-reveal data-reveal-delay={i * 70}>
@@ -63,32 +72,129 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
   <section class="section projects">
     <div class="wrap">
       <h2 class="sec-title display" data-reveal>Selected projects</h2>
-      <div class="projects__grid">
-        {PROJECTS.map((p, i) => (
-          <article class={`card ticks proj ${p.featured ? 'proj--feat' : ''}`} data-reveal data-reveal-delay={(i % 3) * 60}>
-            <div class="proj__top">
-              <h3 class="proj__name">{p.name}</h3>
-              {p.featured && <span class="tag tag--accent">Featured</span>}
-            </div>
-            <p class="proj__blurb muted">{p.blurb}</p>
-            <div class="proj__foot">
-              <div class="proj__tags">{p.tags.map((t) => <span class="tag">{t}</span>)}</div>
-              {p.link && (
-                <a class="proj__link mono" href={p.link.href} target="_blank" rel="noopener noreferrer">
-                  {p.link.label} ↗
-                </a>
+
+      <!-- summary stats -->
+      <div class="projstats mono" data-reveal>
+        <span class="projstats__item"><b>{PROJECTS.length}</b> projects</span>
+        <span class="projstats__sep" aria-hidden="true">·</span>
+        <span class="projstats__item"><b>{PROJECT_CATEGORIES.length}</b> fields</span>
+        <span class="projstats__sep" aria-hidden="true">·</span>
+        <span class="projstats__item"><b>{liveCount}</b> with source / live links</span>
+      </div>
+
+      <!-- category filter chips -->
+      <div class="filters" role="group" aria-label="Filter projects by category" data-reveal>
+        <button type="button" class="chip chip--on" data-filter="all" aria-pressed="true">All</button>
+        {PROJECT_CATEGORIES.map((c) => (
+          <button type="button" class="chip" data-filter={c} aria-pressed="false">{c}</button>
+        ))}
+      </div>
+
+      <div class="projects__grid" id="projGrid" aria-live="polite">
+        {ordered.map((p, i) => (
+          <article
+            class={`card ticks proj ${p.featured ? 'proj--feat' : ''}`}
+            data-reveal
+            data-reveal-delay={(i % 3) * 60}
+            data-cat={p.category}
+            data-cardfx={p.anim ?? 'notegraph'}
+            data-cardfx-seed={i + 1}
+            tabindex="0"
+            aria-label={`${p.name} — ${p.category}${p.metric ? `. ${p.metric}` : ''}`}
+          >
+            <canvas class="cardfx-canvas" aria-hidden="true"></canvas>
+            <div class="proj__inner">
+              <div class="proj__top">
+                <h3 class="proj__name">{p.name}</h3>
+                <div class="proj__badges">
+                  {p.featured && <span class="tag tag--accent">★ Featured</span>}
+                  <span class="proj__cat mono">{p.category}</span>
+                </div>
+              </div>
+
+              <p class="proj__blurb muted">{p.blurb}</p>
+
+              {p.metric && (
+                <p class="proj__metric mono" aria-hidden="true">
+                  <span class="proj__metric-mark">▸</span>{p.metric}
+                </p>
               )}
+
+              <div class="proj__foot">
+                <div class="proj__tags">
+                  {p.lang && <span class="tag tag--lang">{p.lang}</span>}
+                  {p.tags.map((t) => <span class="tag">{t}</span>)}
+                </div>
+                <div class="proj__links">
+                  {typeof p.stars === 'number' && (
+                    <span class="proj__stars mono" title={`${p.stars} GitHub stars`}>
+                      ★ {p.stars}
+                    </span>
+                  )}
+                  {p.link && (
+                    <a class="proj__link mono" href={p.link.href} target="_blank" rel="noopener noreferrer">
+                      {p.link.href.includes('github.com') ? 'Source' : p.link.label} ↗
+                    </a>
+                  )}
+                  {p.live && (
+                    <a class="proj__link proj__link--live mono" href={p.live.href} target="_blank" rel="noopener noreferrer">
+                      Live ↗
+                    </a>
+                  )}
+                </div>
+              </div>
             </div>
           </article>
         ))}
       </div>
+
+      <p class="projects__empty mono" id="projEmpty" hidden>No projects in this category.</p>
     </div>
   </section>
   </div>
+
+  <script>
+    import { startCardFx } from '@/lib/cardfx/engine';
+
+    // ---- per-project Canvas2D background animations ----
+    // One shared rAF loop drives every card's <canvas>; offscreen / filtered-out
+    // cards are skipped, fps is capped, and prefers-reduced-motion is honored.
+    startCardFx(document);
+
+    // ---- category filter chips ----
+    // We toggle a `.proj--out` class instead of removing nodes, so the
+    // scroll-reveal state set by the global IntersectionObserver is preserved.
+    const grid = document.getElementById('projGrid');
+    const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('.chip'));
+    const empty = document.getElementById('projEmpty');
+
+    function apply(filter: string) {
+      const cards = Array.from(grid?.querySelectorAll<HTMLElement>('.proj') ?? []);
+      let shown = 0;
+      cards.forEach((card) => {
+        const match = filter === 'all' || card.dataset.cat === filter;
+        card.classList.toggle('proj--out', !match);
+        if (match) shown++;
+      });
+      if (empty) empty.hidden = shown !== 0;
+    }
+
+    chips.forEach((chip) => {
+      chip.addEventListener('click', () => {
+        chips.forEach((c) => {
+          const on = c === chip;
+          c.classList.toggle('chip--on', on);
+          c.setAttribute('aria-pressed', String(on));
+        });
+        apply(chip.dataset.filter ?? 'all');
+      });
+    });
+  </script>
 </Base>
 
 <style>
   .sec-title { font-size: clamp(1.8rem, 1.4rem + 2.4vw, 3.2rem); margin-bottom: 2.5rem; }
+  .sec-lede { max-width: 56ch; margin: -1.6rem 0 2.4rem; font-size: 1.02rem; }
 
   /* experience timeline */
   .xp__list { display: flex; flex-direction: column; gap: 2.5rem; }
@@ -119,17 +225,86 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
   .interlude__quote em { font-style: italic; color: var(--cyan-soft); }
   .interlude__cap { margin-top: 1.2rem; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--cyan); text-shadow: 0 2px 20px var(--bg); }
 
-  /* projects */
+  /* projects — summary stats */
+  .projstats { display: flex; align-items: center; gap: 0.7rem; flex-wrap: wrap; margin: -1.6rem 0 1.4rem; font-size: 0.78rem; color: var(--ink-dim); }
+  .projstats b { color: var(--cyan); font-weight: 600; }
+  .projstats__sep { color: var(--ink-faint); }
+
+  /* category filter chips */
+  .filters { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-bottom: 1.8rem; }
+  .chip {
+    font-family: var(--mono); font-size: 0.72rem; letter-spacing: 0.04em;
+    padding: 0.4em 0.95em; border-radius: 100px;
+    border: 1px solid var(--line-2); color: var(--ink-dim);
+    background: rgba(255,255,255,0.015); cursor: pointer;
+    transition: border-color 0.35s var(--ease), color 0.35s var(--ease), background 0.35s var(--ease), transform 0.2s var(--ease);
+  }
+  .chip:hover { color: var(--ink); border-color: var(--cyan); transform: translateY(-1px); }
+  .chip--on { color: #021018; background: var(--cyan); border-color: var(--cyan); box-shadow: var(--glow-cyan); }
+  .chip--on:hover { color: #021018; }
+  .chip:focus-visible { outline: 2px solid var(--cyan-soft); outline-offset: 3px; }
+
   .projects__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 1rem; }
-  .proj { display: flex; flex-direction: column; min-height: 230px; }
+  .projects__empty { color: var(--ink-faint); letter-spacing: 0.1em; padding: 2rem 0; }
+
+  .proj { position: relative; display: flex; flex-direction: column; min-height: 240px; overflow: hidden; }
+  .proj__inner { position: relative; z-index: 1; display: flex; flex-direction: column; flex: 1; }
   .proj--feat { border-color: rgba(56,232,200,0.22); }
-  .proj__top { display: flex; justify-content: space-between; align-items: center; gap: 1rem; }
+
+  /* per-project Canvas2D animation washing behind the card, brightening on hover.
+     Masked to fade toward the top so the title/blurb stay legible. */
+  .cardfx-canvas {
+    position: absolute; inset: 0; z-index: 0;
+    width: 100%; height: 100%;
+    opacity: 0.22; pointer-events: none;
+    transition: opacity 0.6s var(--ease);
+    -webkit-mask-image: linear-gradient(180deg, rgba(0,0,0,0.35), #000 55%);
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.35), #000 55%);
+  }
+  .proj:hover .cardfx-canvas, .proj:focus-within .cardfx-canvas { opacity: 0.34; }
+  .proj--feat .cardfx-canvas { opacity: 0.26; }
+  .proj--feat:hover .cardfx-canvas, .proj--feat:focus-within .cardfx-canvas { opacity: 0.38; }
+  @media (prefers-reduced-motion: reduce) {
+    .cardfx-canvas { opacity: 0.18; }
+  }
+
+  /* filtered-out cards collapse smoothly */
+  .proj--out { display: none; }
+
+  .proj__top { display: flex; justify-content: space-between; align-items: flex-start; gap: 1rem; }
   .proj__name { font-size: 1.4rem; font-family: var(--display); }
+  .proj__badges { display: flex; flex-direction: column; align-items: flex-end; gap: 0.35rem; flex-shrink: 0; }
+  .proj__cat { font-size: 0.62rem; letter-spacing: 0.14em; text-transform: uppercase; color: var(--ink-faint); }
   .proj__blurb { margin-top: 0.8rem; font-size: 0.95rem; flex: 1; }
+
+  /* hover-reveal metric: collapsed by default, springs open on hover/focus */
+  .proj__metric {
+    display: grid; grid-template-rows: 0fr;
+    margin-top: 0; color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.02em;
+    opacity: 0; transition: grid-template-rows 0.5s var(--ease), opacity 0.4s var(--ease), margin-top 0.5s var(--ease);
+  }
+  .proj__metric > * { overflow: hidden; min-height: 0; }
+  .proj__metric-mark { color: var(--cyan-soft); margin-right: 0.45em; }
+  .proj:hover .proj__metric, .proj:focus-within .proj__metric, .proj:focus .proj__metric {
+    grid-template-rows: 1fr; opacity: 1; margin-top: 0.85rem;
+  }
+  /* always show the metric on touch devices, where there is no hover */
+  @media (hover: none) {
+    .proj__metric { grid-template-rows: 1fr; opacity: 1; margin-top: 0.85rem; }
+  }
+
   .proj__foot { margin-top: 1.2rem; }
   .proj__tags { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
-  .proj__link { color: var(--blue-soft); font-size: 0.8rem; }
+  .tag--lang { color: var(--blue-soft); border-color: rgba(0,153,255,0.3); }
+  .proj__links { display: flex; align-items: center; gap: 0.9rem; flex-wrap: wrap; }
+  .proj__stars { font-size: 0.78rem; color: var(--amber); }
+  .proj__link { color: var(--blue-soft); font-size: 0.8rem; transition: color 0.3s; }
   .proj__link:hover { color: var(--cyan); }
+  .proj__link--live { color: var(--cyan); }
+  .proj__link--live:hover { color: var(--cyan-soft); }
+
+  /* accessible focus for keyboard users */
+  .proj:focus-visible { outline: 2px solid var(--cyan); outline-offset: 3px; border-color: var(--cyan); }
 
   @media (max-width: 760px) {
     .xp__item { grid-template-columns: 1fr; }
