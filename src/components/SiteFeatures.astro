@@ -45,7 +45,7 @@ const cmds = [
     <ul class="help__list">
       <li><span class="help__keys"><kbd>⌘</kbd>/<kbd>Ctrl</kbd><kbd>K</kbd></span><span class="help__desc">Open the command palette</span></li>
       <li><span class="help__keys"><kbd>/</kbd></span><span class="help__desc">Open the command palette</span></li>
-      <li><span class="help__keys"><kbd>g</kbd> then <kbd>h</kbd>/<kbd>a</kbd>/<kbd>w</kbd>/<kbd>l</kbd>/<kbd>n</kbd></span><span class="help__desc">Jump to Home, About, Work, Library, Now</span></li>
+      <li><span class="help__keys"><kbd>g</kbd> then <kbd>h</kbd>/<kbd>a</kbd>/<kbd>w</kbd>/<kbd>l</kbd></span><span class="help__desc">Jump to Home, About, Work, Library</span></li>
       <li><span class="help__keys"><kbd>1</kbd>–<kbd>9</kbd></span><span class="help__desc">Play a note (Andrew’s a pianist)</span></li>
       <li><span class="help__keys">type <kbd>cube</kbd></span><span class="help__desc">Solve a Rubik’s cube</span></li>
       <li><span class="help__keys">↑↑↓↓←→←→<kbd>b</kbd><kbd>a</kbd></span><span class="help__desc">The Konami code — try it</span></li>
@@ -180,7 +180,7 @@ const cmds = [
   // ---- keyboard nav: press g then h/a/w/l ; '/' opens palette ----
   let gPending = false, gTimer: number | undefined;
   const NAVMAP: Record<string, string> = {
-    h: '/', a: '/about', w: '/work', l: '/bookshelf', n: '/now',
+    h: '/', a: '/about', w: '/work', l: '/bookshelf',
   };
   addEventListener('keydown', (e) => {
     const tag = (e.target as HTMLElement)?.tagName;

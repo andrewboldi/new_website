@@ -102,20 +102,11 @@ const lab = [
     </div>
   </section>
 
-  <!-- ===== PROTEIN SHOWCASE ===== -->
-  <section class="protein-feature">
+  <!-- ===== AMBIENT GFP ===== -->
+  <div class="protein-feature" aria-hidden="true">
     <div class="protein-feature__scene"><Scene name="protein" /></div>
     <div class="protein-feature__fade"></div>
-    <div class="wrap protein-feature__cap">
-      <p class="eyebrow" data-reveal>Structural biology</p>
-      <h2 class="display protein-feature__title" data-reveal>Green Fluorescent<br/>Protein, folding.</h2>
-      <p class="muted protein-feature__sub" data-reveal>
-        221 residues resolving into an 11-stranded β-barrel (PDB 1EMA) — strands, the
-        central helix, side chains, and the chromophore igniting at its core. The molecule
-        behind the glow this whole site borrows.
-      </p>
-    </div>
-  </section>
+  </div>
 
   <!-- ===== RESEARCH & LAB ===== -->
   <section class="section lab">
@@ -245,15 +236,14 @@ const lab = [
   .facts dt { font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-faint); }
   .facts dd { margin: 0; text-align: right; font-size: 0.9rem; color: var(--ink); }
 
-  /* protein showcase — a big full-bleed folding GFP */
-  .protein-feature { position: relative; min-height: clamp(460px, 78vh, 760px); display: flex; align-items: center; overflow: hidden; margin: 1rem 0 2rem; }
+  /* ambient GFP — a slim, caption-less band that just appears as atmosphere */
+  .protein-feature { position: relative; height: clamp(260px, 40vh, 440px); overflow: hidden; margin: 1rem 0 2rem; opacity: 0.68; pointer-events: none; }
   .protein-feature__scene { position: absolute; inset: 0; z-index: 0; }
+  /* soft edge fades (top/bottom/sides) so it dissolves into the page background. */
   .protein-feature__fade { position: absolute; inset: 0; z-index: 1; pointer-events: none;
-    background: radial-gradient(80% 80% at 72% 50%, transparent, rgba(6,8,15,0.35) 80%),
-      linear-gradient(90deg, var(--bg) 2%, rgba(6,8,15,0.55) 26%, transparent 55%); }
-  .protein-feature__cap { position: relative; z-index: 2; pointer-events: none; }
-  .protein-feature__title { font-size: clamp(2rem, 1.4rem + 3.4vw, 4rem); margin: 0.6rem 0 1rem; text-shadow: 0 4px 40px var(--bg); }
-  .protein-feature__sub { max-width: 42ch; }
+    background:
+      linear-gradient(180deg, var(--bg) 0%, transparent 22%, transparent 78%, var(--bg) 100%),
+      linear-gradient(90deg, var(--bg) 0%, transparent 18%, transparent 82%, var(--bg) 100%); }
 
   /* curiosities */
   .curio__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }

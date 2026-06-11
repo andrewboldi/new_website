@@ -33,54 +33,31 @@ const ghProfile = 'https://github.com/andrewboldi';
     </nav>
   </div>
 
-  <a
-    class="wrap foot__contrib"
-    href={ghProfile}
-    target="_blank"
-    rel="noopener noreferrer"
-    aria-label={`${totalLabel} GitHub contributions in the last year — view Andrew's profile`}
-  >
-    <div class="contrib__head">
-      <p class="eyebrow">GitHub</p>
-      <p class="contrib__total mono">
-        <strong>{totalLabel}</strong> contributions in the last year
-      </p>
-    </div>
+  <div class="wrap foot__base">
+    <span class="mono">© {year} — built with three.js & a lot of curiosity</span>
 
-    <div class="contrib__scroll">
-      <div class="contrib__grid" role="img" aria-hidden="true">
+    <a
+      class="foot__mini-contrib"
+      href={ghProfile}
+      target="_blank"
+      rel="noopener noreferrer"
+      aria-label={`${totalLabel} GitHub contributions in the last year — view Andrew's profile`}
+    >
+      <span class="mini-contrib__grid" role="img" aria-hidden="true">
         {weeks.map((week) => (
-          <div class="contrib__week">
+          <span class="mini-contrib__week">
             {Array.from({ length: 7 }).map((_, d) => {
               const count = week[d];
               const has = count !== undefined;
               const lvl = has ? intensityLevel(count) : -1;
-              return (
-                <span
-                  class="contrib__cell"
-                  data-lvl={has ? lvl : 'empty'}
-                  title={has ? `${count} contribution${count === 1 ? '' : 's'}` : undefined}
-                />
-              );
+              return <span class="mini-contrib__cell" data-lvl={has ? lvl : 'empty'} />;
             })}
-          </div>
+          </span>
         ))}
-      </div>
-    </div>
+      </span>
+      <span class="mini-contrib__cap mono">{totalLabel} commits · github</span>
+    </a>
 
-    <div class="contrib__legend mono">
-      <span>Less</span>
-      <span class="contrib__cell" data-lvl="0" />
-      <span class="contrib__cell" data-lvl="1" />
-      <span class="contrib__cell" data-lvl="2" />
-      <span class="contrib__cell" data-lvl="3" />
-      <span class="contrib__cell" data-lvl="4" />
-      <span>More</span>
-    </div>
-  </a>
-
-  <div class="wrap foot__base">
-    <span class="mono">© {year} — built with three.js & a lot of curiosity</span>
     <div class="binclock-wrap" title="binary clock — Andrew made one in Python">
       <div class="binclock" id="binclock" role="img" aria-label="binary clock showing the local time"></div>
       <span class="binclock-cap mono">local time · binary</span>
@@ -148,50 +125,33 @@ const ghProfile = 'https://github.com/andrewboldi';
   .foot__col a:hover::after { transform: scaleX(1); }
   .foot__col a .faint { transition: color 0.35s; }
   .foot__col a:hover .faint { color: var(--cyan-soft); }
-  .foot__base { display: flex; justify-content: space-between; align-items: center; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 0.72rem; }
+  .foot__base { display: flex; justify-content: space-between; align-items: center; gap: 1.5rem; margin-top: 3rem; padding-top: 1.5rem; border-top: 1px solid var(--line); color: var(--ink-faint); font-size: 0.72rem; }
+  .foot__base > .mono:first-child { flex: 1 1 auto; min-width: 0; }
 
-  /* GitHub contribution heatmap — full-width row above the footer base. */
-  .foot__contrib {
-    display: block; margin-top: 3rem; padding-top: 1.5rem;
-    border-top: 1px solid var(--line);
-    text-decoration: none; color: inherit;
+  /* low-key GitHub contribution graph — a quiet accent in the clock row, not a focal element. */
+  .foot__mini-contrib {
+    display: inline-flex; align-items: center; gap: 0.55rem;
+    text-decoration: none; color: inherit; opacity: 0.55;
+    transition: opacity 0.35s var(--ease);
   }
-  .contrib__head { display: flex; align-items: baseline; gap: 0.9rem; flex-wrap: wrap; margin-bottom: 0.9rem; }
-  .contrib__head .eyebrow { margin: 0; }
-  .contrib__total { font-size: 0.74rem; color: var(--ink-dim); transition: color 0.35s var(--ease); }
-  .contrib__total strong { color: var(--cyan); font-weight: 600; }
-  .foot__contrib:hover .contrib__total { color: var(--ink); }
-
-  /* horizontal scroll guard so the ~53-week grid never forces page overflow */
-  .contrib__scroll { overflow-x: auto; overflow-y: hidden; padding-bottom: 4px; scrollbar-width: thin; scrollbar-color: var(--line-2) transparent; }
-  .contrib__scroll::-webkit-scrollbar { height: 6px; }
-  .contrib__scroll::-webkit-scrollbar-thumb { background: var(--line-2); border-radius: 3px; }
-
-  .contrib__grid { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; gap: 3px; width: max-content; }
-  .contrib__week { display: grid; grid-template-rows: repeat(7, 1fr); gap: 3px; }
-  .contrib__cell {
-    width: 11px; height: 11px; border-radius: 2px;
-    background: var(--surface-2);
-    box-shadow: inset 0 0 0 1px var(--line);
-  }
-  /* 5-step intensity scale: faint surface → site cyan/blue. */
-  .contrib__cell[data-lvl='empty'] { background: transparent; box-shadow: none; }
-  .contrib__cell[data-lvl='0'] { background: var(--surface-2); box-shadow: inset 0 0 0 1px var(--line); }
-  .contrib__cell[data-lvl='1'] { background: color-mix(in srgb, var(--blue) 28%, var(--surface-2)); box-shadow: inset 0 0 0 1px var(--line-2); }
-  .contrib__cell[data-lvl='2'] { background: color-mix(in srgb, var(--blue) 55%, var(--cyan) 10%); box-shadow: none; }
-  .contrib__cell[data-lvl='3'] { background: color-mix(in srgb, var(--cyan) 55%, var(--blue) 35%); box-shadow: none; }
-  .contrib__cell[data-lvl='4'] { background: var(--cyan); box-shadow: 0 0 6px color-mix(in srgb, var(--cyan) 60%, transparent); }
-
-  .contrib__legend { display: flex; align-items: center; gap: 4px; margin-top: 0.8rem; font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); }
-  .contrib__legend span:first-child { margin-right: 2px; }
-  .contrib__legend span:last-child { margin-left: 2px; }
+  .foot__mini-contrib:hover { opacity: 0.9; }
+  .mini-contrib__grid { display: grid; grid-auto-flow: column; grid-auto-columns: max-content; gap: 1.5px; }
+  .mini-contrib__week { display: grid; grid-template-rows: repeat(7, 1fr); gap: 1.5px; }
+  .mini-contrib__cell { width: 4px; height: 4px; border-radius: 1px; background: var(--surface-2); }
+  /* muted, low-contrast intensity — dim ink steps so it reads as a faint texture. */
+  .mini-contrib__cell[data-lvl='empty'] { background: transparent; }
+  .mini-contrib__cell[data-lvl='0'] { background: color-mix(in srgb, var(--ink-faint) 14%, transparent); }
+  .mini-contrib__cell[data-lvl='1'] { background: color-mix(in srgb, var(--ink-faint) 32%, transparent); }
+  .mini-contrib__cell[data-lvl='2'] { background: color-mix(in srgb, var(--ink-faint) 52%, transparent); }
+  .mini-contrib__cell[data-lvl='3'] { background: color-mix(in srgb, var(--cyan) 30%, var(--ink-faint) 30%); }
+  .mini-contrib__cell[data-lvl='4'] { background: color-mix(in srgb, var(--cyan) 55%, transparent); }
+  .mini-contrib__cap { font-size: 0.62rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--ink-faint); white-space: nowrap; }
 
   @media (max-width: 760px) {
     .foot__grid { grid-template-columns: 1fr 1fr; }
     .foot__brand { grid-column: 1 / -1; }
-    .foot__base { flex-direction: column; gap: 0.6rem; text-align: center; }
-    .foot__contrib { margin-top: 2rem; }
-    .contrib__cell { width: 9px; height: 9px; }
-    .contrib__grid, .contrib__week { gap: 2px; }
+    .foot__base { flex-direction: column; gap: 0.7rem; text-align: center; }
+    /* hide the graph itself on mobile to avoid overflow; keep the count label. */
+    .mini-contrib__grid { display: none; }
   }
 </style>

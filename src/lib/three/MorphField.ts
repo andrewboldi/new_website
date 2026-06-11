@@ -150,13 +150,6 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
     edgeGeo.attributes.color.needsUpdate = true;
   };
 
-  // ---- glowing core ----
-  const core = new THREE.Mesh(
-    new THREE.IcosahedronGeometry(1.6, 3),
-    new THREE.MeshBasicMaterial({ color: PALETTE.cyan, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending }),
-  );
-  group.add(core);
-
   // faint structural shell for depth
   const shell = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(R * 1.35, 1)),
@@ -171,38 +164,78 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   const stagger = new Float32Array(N);
   for (let k = 0; k < N; k++) stagger[k] = Math.random();
 
-  // ---- diffusion / denoise intro ----------------------------------------
-  // Particles begin as random gaussian NOISE and condense into the molecule
-  // (shape[0]) over a few seconds, echoing denoising-diffusion generative
-  // chemistry. Buffers are preallocated; the per-particle cascade reuses the
-  // same staggered smootherstep as the scroll morph, so noise→molecule and
-  // molecule→helix feel like one continuous language. No per-frame allocation.
+  // ---- continuous stepped denoising-diffusion on shape[0] ----------------
+  // shape[0] (caffeine) is never a static target: it perpetually runs a reverse
+  // diffusion process and back. Each particle sits at
+  //     molecule + sigma(step) · dir(particle)
+  // where `dir` is a FIXED per-particle gaussian displacement (preallocated) and
+  // `sigma` steps down a discrete cosine noise schedule. A slow ping-pong clock
+  // walks the schedule: denoise (sigma hi→0) → hold clean → re-noise (0→hi) →
+  // hold noisy → repeat, so the structure visibly RESOLVES IN STAGES and loops
+  // back and forth. The per-step ease+hold makes the stages a perceptible
+  // staircase rather than one smooth blend. No per-frame allocation.
   const reduced = prefersReducedMotion();
-  const noise = new Float32Array(N * 3);          // fixed noise field (reused)
-  const noiseStagger = new Float32Array(N);       // per-particle reveal phase
-  const NOISE_R = R * 1.85;                        // noise cloud radius
-  const gauss = () => {                            // Box–Muller-ish gaussian
+  const dir = new Float32Array(N * 3);            // fixed per-particle noise dir
+  const NOISE_R = R * 1.85;                        // full-noise displacement scale
+  const gauss = () => {                            // bell-shaped ~[-1,1]
     let s = 0;
     for (let m = 0; m < 3; m++) s += Math.random();
-    return (s / 3 - 0.5) * 2;                       // ~[-1,1], bell-shaped
+    return (s / 3 - 0.5) * 2;
   };
-  const seedNoise = () => {
-    for (let k = 0; k < N; k++) {
-      noise[k * 3] = gauss() * NOISE_R;
-      noise[k * 3 + 1] = gauss() * NOISE_R;
-      noise[k * 3 + 2] = gauss() * NOISE_R;
-      noiseStagger[k] = Math.random();
-    }
+  for (let k = 0; k < N; k++) {
+    dir[k * 3] = gauss() * NOISE_R;
+    dir[k * 3 + 1] = gauss() * NOISE_R;
+    dir[k * 3 + 2] = gauss() * NOISE_R;
+  }
+
+  // Discrete reverse-diffusion schedule. sigma[0] = full noise, sigma[STEPS] = 0
+  // (clean molecule). Cosine schedule → slow start, fast collapse near the end,
+  // which reads like a real sampler snapping into structure at the last steps.
+  const STEPS = 14;
+  const sigmaLUT = new Float32Array(STEPS + 1);
+  for (let s = 0; s <= STEPS; s++) {
+    const u = s / STEPS;                            // 0 clean … 1 full noise
+    sigmaLUT[s] = Math.sin((u * Math.PI) / 2);      // cosine-ish ease (concave)
+  }
+  // sigma at an arbitrary (fractional, EASED) step position — linear interp of LUT
+  const sigmaAt = (step: number) => {
+    const c = Math.min(STEPS, Math.max(0, step));
+    const lo = Math.floor(c), hi = Math.min(STEPS, lo + 1), fr = c - lo;
+    return sigmaLUT[lo] + (sigmaLUT[hi] - sigmaLUT[lo]) * fr;
   };
-  seedNoise();
-  const INTRO_DUR = 3.2;            // seconds noise→molecule
-  const INTRO_SPREAD = 0.55;        // fraction of the run each particle travels
-  let introStart = -1;             // elapsed-time anchor; set on first frame
-  // reduced motion: skip the animation entirely — rest on the formed molecule.
-  let introActive = !reduced;
-  let introMix = reduced ? 0 : 1;   // 1 = full noise control, 0 = handed off
-  let leftTop = false;             // armed once we've scrolled away (for re-trigger)
-  const TOP_EPS = 0.012;           // "at the very top" threshold (scroll progress)
+
+  // Ping-pong "diffusion clock". A normalized phase 0..1 maps:
+  //   0.00–0.42  denoise  (step STEPS → 0)      ~ molecule forming
+  //   0.42–0.52  HOLD on clean molecule
+  //   0.52–0.94  re-noise (step 0 → STEPS)      ~ dissolving back
+  //   0.94–1.00  HOLD on full noise
+  const CYCLE = reduced ? 1 : 17.0;   // seconds for one full back-and-forth
+  const DENOISE_END = 0.42, CLEAN_HOLD_END = 0.52, RENOISE_END = 0.94;
+  // eased staircase: snap a continuous 0..1 within-schedule fraction to a stepped,
+  // per-step-eased value with a brief hold at each step (perceptible stages).
+  const STEP_HOLD = 0.34;             // fraction of each step spent holding
+  const staircase = (u: number) => {
+    const c = Math.min(1, Math.max(0, u)) * STEPS;  // 0..STEPS continuous
+    const idx = Math.floor(c);
+    if (idx >= STEPS) return STEPS;
+    const fr = c - idx;                              // 0..1 within this step
+    // hold, then smootherstep to the next integer step
+    const e = fr <= STEP_HOLD ? 0
+      : (() => { const x = (fr - STEP_HOLD) / (1 - STEP_HOLD); return x * x * x * (x * (x * 6 - 15) + 10); })();
+    return idx + e;
+  };
+  // eased-staircase step position ∈ [0,STEPS] for a phase (STEPS = full noise).
+  const schedule = (phase: number): number => {
+    if (reduced) return 0;                           // static clean molecule
+    if (phase < DENOISE_END) return STEPS - staircase(phase / DENOISE_END);
+    if (phase < CLEAN_HOLD_END) return 0;            // clean hold
+    if (phase < RENOISE_END)
+      return staircase((phase - CLEAN_HOLD_END) / (RENOISE_END - CLEAN_HOLD_END));
+    return STEPS;                                    // noise hold
+  };
+  let diffActive = !reduced;        // false only under reduced-motion
+  let oscMix = reduced ? 0 : 1;     // 1 = diffusion owns shape[0], 0 = scroll owns
+  const TOP_EPS = 0.012;            // "at the very top" threshold (scroll progress)
 
   const scrollProgress = () => {
     // window.scrollY is robust even when `body { overflow-x: hidden }` makes the
@@ -222,35 +255,30 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
     const i = Math.min(span - 1, Math.floor(sf));
     const f = sf - i;
 
-    // ---- denoise intro state ------------------------------------------------
-    // `introMix` is the global noise→molecule progress (1 = pure noise, 0 = the
-    // intro has fully handed off to the scroll morph). It's driven by elapsed
-    // time, but scrolling away from the top fast-forwards it so the intro never
-    // fights a user who starts scrolling mid-condensation.
-    if (introActive) {
-      if (introStart < 0) introStart = t;            // anchor on the first live frame
-      const ageRaw = (t - introStart) / INTRO_DUR;   // 0..1 time progress
-      // if the user scrolls during the intro, push the run forward so noise clears
-      const scrollPush = progress > TOP_EPS ? Math.min(1, progress / 0.05) : 0;
-      const age = Math.min(1, Math.max(ageRaw, scrollPush));
-      // global mix = how much noise remains once the last particle has condensed
-      introMix = 1 - (age <= 0 ? 0 : age >= 1 ? 1 : age * age * age * (age * (age * 6 - 15) + 10));
-      if (age >= 1) { introActive = false; introMix = 0; }
-    }
-
-    // Re-arm + re-trigger the denoise when the field returns to the very top
-    // after having been scrolled away (a nice "regenerate" beat; cheap to do).
-    if (!introActive) {
-      if (progress > 0.06) leftTop = true;
-      else if (leftTop && progress < TOP_EPS && !reduced) {
-        leftTop = false; introActive = true; introStart = t; introMix = 1; seedNoise();
-      }
-    }
+    // ---- diffusion clock + scroll handoff -----------------------------------
+    // `oscMix` is how much the diffusion oscillation owns shape[0] (1 at the very
+    // top, easing to 0 as you scroll into the morph) — so the perpetual noising
+    // never fights a user who scrolls away. The clock keeps ticking underneath,
+    // so returning to the top rejoins the oscillation already in motion.
+    const oscTarget = diffActive ? Math.min(1, Math.max(0, 1 - progress / 0.06)) : 0;
+    oscMix += (oscTarget - oscMix) * Math.min(1, dt * 4);   // smooth fade, no pop
+    // ping-pong phase from elapsed time (sawtooth 0..1 over CYCLE seconds)
+    const phase = diffActive ? (t / CYCLE) % 1 : 0;
+    const sigma = sigmaAt(schedule(phase));                   // 0 clean … 1 noise
+    // "resolved" only ramps in the last ~30% of denoising (low sigma) so the
+    // bond web snaps in as the molecule forms and dissolves as it re-noises.
+    const RES_LO = 0.0, RES_HI = 0.42;                        // sigma window
+    const rRaw = 1 - Math.min(1, Math.max(0, (sigma - RES_LO) / (RES_HI - RES_LO)));
+    const resolved = rRaw * rRaw * (3 - 2 * rRaw);            // smoothstep
+    // live "boiling" jitter: strong at high sigma, calms to nothing as it settles
+    const boil = sigma * sigma * 0.14 * R;
+    // whether diffusion currently perturbs the buffers enough to rewrite them
+    const diffOn = oscMix > 0.001 && (sigma > 0.0005 || oscMix < 0.999);
 
     // only rewrite the buffers when the shape state actually moved (the drift in
     // the vertex shader keeps it alive while idle) — this is the scroll-cost win.
-    // While the intro animates we must rewrite every frame so noise can condense.
-    if (introActive || i !== lastI || Math.abs(f - lastF) > 0.0008) {
+    // While the diffusion oscillates we rewrite every frame so it can breathe.
+    if (diffOn || i !== lastI || Math.abs(f - lastF) > 0.0008) {
       lastI = i; lastF = f;
       const a = targets[i], b = targets[i + 1];
       // brief hold at each end keeps shapes legible; the middle is a staggered,
@@ -258,11 +286,9 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
       const HOLD = 0.2;
       const g = Math.min(1, Math.max(0, (f - HOLD) / (1 - 2 * HOLD)));
       const W = 0.6; // fraction of the cascade each particle takes to travel
-      // intro time progress (shared across particles; per-particle phase below)
-      const introAge = introActive
-        ? Math.min(1, Math.max((t - introStart) / INTRO_DUR,
-            progress > TOP_EPS ? Math.min(1, progress / 0.05) : 0))
-        : 1;
+      // per-particle stagger spreads the sigma slightly so the resolve doesn't
+      // happen in perfect lockstep — front of the cascade settles a touch first.
+      const SIG_SPREAD = 0.18;
       for (let k = 0; k < N; k++) {
         const x = (g - stagger[k] * (1 - W)) / W;
         const pb = x <= 0 ? 0 : x >= 1 ? 1 : x * x * x * (x * (x * 6 - 15) + 10); // smootherstep
@@ -274,18 +300,25 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
         const cr = a.c[k3] + (b.c[k3] - a.c[k3]) * pb;
         const cg = a.c[k3 + 1] + (b.c[k3 + 1] - a.c[k3 + 1]) * pb;
         const cb = a.c[k3 + 2] + (b.c[k3 + 2] - a.c[k3 + 2]) * pb;
-        if (introActive) {
-          // per-particle denoise: same staggered smootherstep, so order emerges
-          // out of noise one cascade at a time. dn: 0 = still noise, 1 = settled.
-          const ix = (introAge - noiseStagger[k] * (1 - INTRO_SPREAD)) / INTRO_SPREAD;
-          const dn = ix <= 0 ? 0 : ix >= 1 ? 1 : ix * ix * ix * (ix * (ix * 6 - 15) + 10);
-          positions[k3] = noise[k3] + (tx - noise[k3]) * dn;
-          positions[k3 + 1] = noise[k3 + 1] + (ty - noise[k3 + 1]) * dn;
-          positions[k3 + 2] = noise[k3 + 2] + (tz - noise[k3 + 2]) * dn;
-          // colors brighten as particles settle (noise reads dim/cold)
-          colors[k3] = cr * (0.25 + 0.75 * dn);
-          colors[k3 + 1] = cg * (0.25 + 0.75 * dn);
-          colors[k3 + 2] = cb * (0.45 + 0.55 * dn);
+        if (diffOn) {
+          // reverse-diffusion displacement away from the (scroll-blended) target.
+          // sig: this particle's effective noise level (sigma + tiny stagger),
+          // faded by oscMix so scrolling hands smoothly back to the clean morph.
+          let sig = sigma + (stagger[k] - 0.5) * SIG_SPREAD * sigma;
+          if (sig < 0) sig = 0;
+          const amp = sig * oscMix;
+          // live stochastic boil (cheap trig hash), strongest at high sigma
+          const bx = Math.sin(t * 2.1 + k * 12.9898) * boil * oscMix;
+          const by = Math.cos(t * 1.7 + k * 7.233) * boil * oscMix;
+          const bz = Math.sin(t * 2.4 + k * 3.111) * boil * oscMix;
+          positions[k3] = tx + dir[k3] * amp + bx;
+          positions[k3 + 1] = ty + dir[k3 + 1] * amp + by;
+          positions[k3 + 2] = tz + dir[k3 + 2] * amp + bz;
+          // dim + cool the points while noisy; brighten as they resolve
+          const lit = 1 - oscMix * (1 - resolved);
+          colors[k3] = cr * (0.25 + 0.75 * lit);
+          colors[k3 + 1] = cg * (0.25 + 0.75 * lit);
+          colors[k3 + 2] = cb * (0.45 + 0.55 * lit);
         } else {
           positions[k3] = tx; positions[k3 + 1] = ty; positions[k3 + 2] = tz;
           colors[k3] = cr; colors[k3 + 1] = cg; colors[k3 + 2] = cb;
@@ -296,12 +329,11 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
       updateWeb();
     }
 
-    // bond web fades in as atoms settle out of the noise (and stays full after).
-    edgeMat.opacity = 0.55 * (1 - introMix);
-
-    // pulsing core
-    core.scale.setScalar(1 + 0.22 * Math.sin(t * 1.8));
-    (core.material as THREE.MeshBasicMaterial).opacity = (0.6 + 0.25 * Math.sin(t * 1.8 + 1)) * (1 - 0.6 * introMix);
+    // bond web fades IN only as the structure resolves (last ~30% of denoising)
+    // and dissolves as it re-noises. Away from the top (oscMix→0) the web returns
+    // to full strength for the scroll-morph shapes.
+    const formed = 1 - oscMix * (1 - resolved);     // 1 when clean OR scrolled
+    edgeMat.opacity = 0.55 * formed;
 
     // notify the page which field we're in
     const stageIdx = Math.round(sf);
@@ -323,6 +355,5 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   onDispose(() => {
     geo.dispose(); mat.dispose();
     edgeGeo.dispose(); edgeMat.dispose();
-    core.geometry.dispose(); (core.material as THREE.Material).dispose();
   });
 }
