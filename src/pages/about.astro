@@ -2,6 +2,7 @@
 import Base from '@/layouts/Base.astro';
 import PageHeader from '@/components/PageHeader.astro';
 import Scene from '@/components/Scene.astro';
+import MorphBackground from '@/components/MorphBackground.astro';
 import { SITE, SOCIALS } from '@/lib/site';
 import { POLYMATH, COURSEWORK } from '@/lib/data';
 
@@ -13,6 +14,8 @@ const courseScene: Record<string, string> = {
 ---
 
 <Base title="About" description="Andrew Boldi — chemical biologist, computer scientist, pianist, and incorrigible polymath.">
+  <MorphBackground />
+  <div class="page-body page-body--solidtop">
   <PageHeader
     eyebrow="About · who I am"
     title="A chemist who<br/>learned to compute."
@@ -50,15 +53,28 @@ const courseScene: Record<string, string> = {
       </div>
 
       <aside class="bio__side" data-reveal data-reveal-delay="120">
-        <div class="bio__scene"><Scene name="protein" /></div>
         <dl class="facts">
           <div><dt>Now</dt><dd>AI Intern, Soley Therapeutics</dd></div>
           <div><dt>Study</dt><dd>Chem Bio + CS, UC Berkeley</dd></div>
           <div><dt>Based</dt><dd>{SITE.location}</dd></div>
           <div><dt>Grad</dt><dd>June 2027</dd></div>
         </dl>
-        <p class="bio__caption faint mono">↑ Crambin (1CRN) — a 46-residue protein, folding.</p>
       </aside>
+    </div>
+  </section>
+
+  <!-- ===== PROTEIN SHOWCASE ===== -->
+  <section class="protein-feature">
+    <div class="protein-feature__scene"><Scene name="protein" /></div>
+    <div class="protein-feature__fade"></div>
+    <div class="wrap protein-feature__cap">
+      <p class="eyebrow" data-reveal>Structural biology</p>
+      <h2 class="display protein-feature__title" data-reveal>Green Fluorescent<br/>Protein, folding.</h2>
+      <p class="muted protein-feature__sub" data-reveal>
+        221 residues resolving into an 11-stranded β-barrel (PDB 1EMA) — strands, the
+        central helix, side chains, and the chromophore igniting at its core. The molecule
+        behind the glow this whole site borrows.
+      </p>
     </div>
   </section>
 
@@ -103,6 +119,7 @@ const courseScene: Record<string, string> = {
       </div>
     </div>
   </section>
+  </div>
 </Base>
 
 <style>
@@ -116,12 +133,20 @@ const courseScene: Record<string, string> = {
   .bio__text em { font-family: var(--display); font-style: italic; font-size: 1.1em; color: var(--blue-soft); }
   .bio__links { display: flex; gap: 0.7rem; flex-wrap: wrap; margin-top: 0.8rem; }
 
-  .bio__scene { height: 320px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle at 50% 40%, rgba(0,153,255,0.08), transparent 70%); }
-  .facts { margin: 1.5rem 0 0.6rem; display: flex; flex-direction: column; gap: 0; }
+  .facts { margin: 0.5rem 0 0.6rem; display: flex; flex-direction: column; gap: 0; }
   .facts div { display: flex; justify-content: space-between; gap: 1rem; padding: 0.7rem 0; border-bottom: 1px solid var(--line); }
   .facts dt { font-family: var(--mono); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.14em; color: var(--ink-faint); }
   .facts dd { margin: 0; text-align: right; font-size: 0.9rem; color: var(--ink); }
-  .bio__caption { font-size: 0.72rem; margin-top: 0.4rem; }
+
+  /* protein showcase — a big full-bleed folding GFP */
+  .protein-feature { position: relative; min-height: clamp(460px, 78vh, 760px); display: flex; align-items: center; overflow: hidden; margin: 1rem 0 2rem; }
+  .protein-feature__scene { position: absolute; inset: 0; z-index: 0; }
+  .protein-feature__fade { position: absolute; inset: 0; z-index: 1; pointer-events: none;
+    background: radial-gradient(80% 80% at 72% 50%, transparent, rgba(6,8,15,0.35) 80%),
+      linear-gradient(90deg, var(--bg) 2%, rgba(6,8,15,0.55) 26%, transparent 55%); }
+  .protein-feature__cap { position: relative; z-index: 2; pointer-events: none; }
+  .protein-feature__title { font-size: clamp(2rem, 1.4rem + 3.4vw, 4rem); margin: 0.6rem 0 1rem; text-shadow: 0 4px 40px var(--bg); }
+  .protein-feature__sub { max-width: 42ch; }
 
   /* polymath */
   .poly__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }

@@ -141,7 +141,7 @@ const stars = (r?: number) =>
   const books: BookData[] = dataEl ? JSON.parse(dataEl.textContent || '[]') : [];
 
   if (books.length) {
-    mount('#shelf', (h) => bookshelf3D(h, books), { bloom: { strength: 0.5, radius: 0.5, threshold: 0.2 } });
+    mount('#shelf', (h) => bookshelf3D(h, books), { bloom: { strength: 0.32, radius: 0.5, threshold: 0.45 } });
   }
 
   // 3D hover -> crisp DOM caption

@@ -2,10 +2,13 @@
 import Base from '@/layouts/Base.astro';
 import PageHeader from '@/components/PageHeader.astro';
 import Scene from '@/components/Scene.astro';
+import MorphBackground from '@/components/MorphBackground.astro';
 import { EXPERIENCE, PROJECTS } from '@/lib/data';
 ---
 
 <Base title="Work" description="Research, internships, and projects — from total synthesis at Caltech to molecular ML at Soley Therapeutics.">
+  <MorphBackground />
+  <div class="page-body page-body--solidtop">
   <PageHeader
     eyebrow="Work · research & projects"
     title="What I’ve built,<br/>and figured out."
@@ -80,6 +83,7 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
       </div>
     </div>
   </section>
+  </div>
 </Base>
 
 <style>

@@ -200,6 +200,33 @@ p a:hover, .prose a:hover { background-size: 100% 1px; color: var(--cyan-soft); 
    elements rendered by child components (Astro scopes per-component styles). */
 .abs-fill { position: absolute; inset: 0; }
 
+/* ---------- morphing background (shared across pages) ---------- */
+.bg-field { position: fixed; inset: 0; z-index: 0; }
+.field-tag {
+  position: fixed; bottom: 1.5rem; left: var(--gut); z-index: 3;
+  display: flex; align-items: center; gap: 0.55rem;
+  font-family: var(--mono); font-size: 0.7rem; letter-spacing: 0.16em; text-transform: uppercase;
+  color: var(--ink-dim); pointer-events: none; transition: opacity 0.6s var(--ease);
+}
+.field-tag__dot { width: 8px; height: 8px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 12px var(--cyan); transition: background 0.6s, box-shadow 0.6s; }
+@media (max-width: 760px) { .field-tag { display: none; } }
+
+/* content sits on a translucent panel so the field glows through but text reads.
+   No backdrop-filter (it re-blurs every scroll frame and draws a hard seam). */
+.page-body {
+  position: relative; z-index: 1;
+  background: linear-gradient(180deg, rgba(6,8,15,0) 0%, rgba(6,8,15,0.52) 16%, rgba(6,8,15,0.52) 100%);
+}
+.page-body--solidtop { background: rgba(6,8,15,0.52); }
+.page-body .display, .page-body h1, .page-body h2,
+.page-body .sec-title, .page-body .now__text, .page-body .ph__title,
+.page-body .wt__name, .page-body .split__title, .page-body .contact__title {
+  text-shadow: 0 2px 30px rgba(6,8,15,0.9), 0 1px 8px rgba(6,8,15,0.8);
+}
+.page-body .eyebrow, .page-body .muted, .page-body .post-list__title {
+  text-shadow: 0 1px 12px rgba(6,8,15,0.9);
+}
+
 /* utility */
 .center { text-align: center; }
 .muted { color: var(--ink-dim); }

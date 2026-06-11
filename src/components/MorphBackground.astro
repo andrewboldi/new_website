@@ -1,0 +1,34 @@
+---
+/**
+ * Fixed, scroll-driven morphing particle field used as a living page background.
+ * Drop it once near the top of a page, then wrap the page content in
+ * `<div class="page-body">` so text reads over it. Reused on home/about/work.
+ */
+---
+
+<div class="bg-field" id="bg-field" aria-hidden="true"></div>
+<div class="field-tag" id="field-tag" aria-hidden="true">
+  <span class="field-tag__dot"></span><span id="field-tag-label">latent chemical space</span>
+</div>
+
+<script>
+  import { mount } from '@/lib/three/core';
+  import { morphField } from '@/lib/three/MorphField';
+  import * as THREE from 'three';
+
+  const tag = document.getElementById('field-tag');
+  const label = document.getElementById('field-tag-label');
+  const dot = tag?.querySelector('.field-tag__dot') as HTMLElement | null;
+
+  mount('#bg-field', (h) =>
+    morphField(h, {
+      onStage: (_i, text, accent) => {
+        if (label) label.textContent = text;
+        if (dot) {
+          const c = '#' + new THREE.Color(accent).getHexString();
+          dot.style.background = c;
+          dot.style.boxShadow = `0 0 12px ${c}`;
+        }
+      },
+    }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.3 });
+</script>

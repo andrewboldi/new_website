@@ -223,11 +223,11 @@ export function bookshelf3D(handle: SceneHandle, books: BookData[]) {
       m.rotation.x = THREE.MathUtils.lerp(m.rotation.x, tilt, 0.16);
       m.rotation.z = THREE.MathUtils.lerp(m.rotation.z, isHot || isSel ? 0 : rest.rot, 0.16);
       m.scale.setScalar(THREE.MathUtils.lerp(m.scale.x, scl, 0.16));
-      // brighten the spine on hover/select
+      // gently lift the spine on hover/select (subtle — bloom amplifies this)
       const mats = m.material as THREE.MeshStandardMaterial[];
       const spine = mats[4];
-      const target = isSel ? 0.55 : isHot ? 0.42 : 0;
-      spine.emissive.set(PALETTE.cyan);
+      const target = isSel ? 0.22 : isHot ? 0.13 : 0;
+      spine.emissive.set(0x2a3550);
       spine.emissiveIntensity = THREE.MathUtils.lerp(spine.emissiveIntensity ?? 0, target, 0.16);
     }
 
