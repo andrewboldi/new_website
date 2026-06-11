@@ -135,7 +135,6 @@ export function energyLandscape(handle: SceneHandle) {
         gl_FragColor = vec4(col, alpha);
       }`,
   });
-  surfMat.extensions = { derivatives: true } as unknown as THREE.ShaderMaterialParameters['extensions'];
   const surface = new THREE.Mesh(surfGeo, surfMat);
   group.add(surface);
 
