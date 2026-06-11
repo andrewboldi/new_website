@@ -3,9 +3,15 @@
  * Fixed, scroll-driven morphing particle field used as a living page background.
  * Drop it once near the top of a page, then wrap the page content in
  * `<div class="page-body">` so text reads over it. Reused on home/about/work.
+ *
+ * Layering (back → front):
+ *   .ambient-field  — slow domain-warped fBm atmosphere (depth, this component)
+ *   .bg-field       — the molecular MorphField particles (existing character)
+ *   .page-body      — content on a translucent scrim (global.css)
  */
 ---
 
+<div class="ambient-field" id="ambient-field" aria-hidden="true"></div>
 <div class="bg-field" id="bg-field" aria-hidden="true"></div>
 <div class="field-tag" id="field-tag" aria-hidden="true">
   <span class="field-tag__dot"></span><span id="field-tag-label">generative diffusion → caffeine</span>
@@ -14,7 +20,19 @@
 <script>
   import { mount } from '@/lib/three/core';
   import { morphField } from '@/lib/three/MorphField';
+  import { ambientField } from '@/lib/three/AmbientField';
   import * as THREE from 'three';
+
+  // Deep atmospheric layer behind the molecules. No bloom (it's a self-lit
+  // gradient — bloom would raise exposure / risk blowout); cheap fixed-cost fBm,
+  // so pixelRatio is capped low and it stays mobile-trivial. Reduced-motion is
+  // honoured inside the module (uTime frozen) + core renders one static frame.
+  const mobile = matchMedia('(max-width: 760px)').matches;
+  mount('#ambient-field', (h) => ambientField(h), {
+    bloom: false,
+    alpha: true,
+    maxPixelRatio: mobile ? 1.0 : 1.3,
+  });
 
   const tag = document.getElementById('field-tag');
   const label = document.getElementById('field-tag-label');
@@ -32,3 +50,31 @@
       },
     }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.3 });
 </script>
+
+<style>
+  /* Deep atmosphere: sits between the body gradient (z -2 / -1) and the
+     molecular field (.bg-field, z 0). Low opacity + soft blur so it reads as
+     ambient depth, never as a competing layer, and keeps text readable (the
+     .page-body scrim still draws on top). pointer-events none so it never
+     intercepts clicks. */
+  .ambient-field {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    opacity: 0.42;
+    filter: blur(2px) saturate(1.05);
+    will-change: opacity;
+  }
+  /* Slightly stronger on large screens where the depth has room to breathe. */
+  @media (min-width: 1100px) {
+    .ambient-field { opacity: 0.5; }
+  }
+  /* Calmer still on mobile — the molecules already carry the character there. */
+  @media (max-width: 760px) {
+    .ambient-field { opacity: 0.34; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .ambient-field { filter: blur(2px); }
+  }
+</style>
