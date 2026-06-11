@@ -1,6 +1,6 @@
 ---
 import Base from '@/layouts/Base.astro';
-import { getCollection } from 'astro:content';
+import { getCollection, render } from 'astro:content';
 
 const strip = (md: string) =>
   md.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`>#]/g, '').replace(/\s+/g, ' ').trim();
@@ -15,46 +15,59 @@ const shelfData = books.map((b) => ({
 const posts = (await getCollection('blog'))
   .filter((p) => !p.data.draft)
   .sort((a, b) => +new Date(b.data.date) - +new Date(a.data.date));
+const renderedPosts = await Promise.all(posts.map(async (p) => ({ post: p, Content: (await render(p)).Content })));
 const writingData = posts.map((p) => ({
   title: p.data.title,
   date: new Date(p.data.date).toISOString().slice(0, 10),
   body: strip(p.body ?? ''),
   accent: '#caa86a',
 }));
+const fmt = (d: Date) => new Date(d).toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' });
 
 const payload = { books: shelfData, writings: writingData };
 ---
 
 <Base title="Library" description="Andrew Boldi's library — the books shaping how he thinks, and his writing as scrolls you can unroll.">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css" integrity="sha384-nB0miv6/jRmo5UMMR1wu3Gz6NLsoTkbqJghGIsx//Rlm+ZU03BU6SQNC66uf4l5+" crossorigin="anonymous" />
+
   <section class="lib">
     <header class="lib__head wrap">
       <p class="eyebrow" data-reveal>The library</p>
       <h1 class="display lib__title" data-reveal>Everything I’m<br/>reading &amp; writing.</h1>
       <p class="lib__hint mono faint" data-reveal>
-        hover a spine to ease it out · click a book to open it · click a scroll on the top shelf to unroll an essay
+        hover a spine to ease it out · click a book to open it · click a scroll on the top shelf to read an essay
       </p>
     </header>
-
     <div class="lib__stage scene-host" id="library"></div>
   </section>
 
-  <!-- accessible / no-JS / SEO copy of everything on the shelf -->
+  <!-- essay reader modal (rendered markdown + KaTeX, scrollable) -->
+  <div class="reader" id="reader" hidden>
+    <div class="reader__backdrop" data-reader-close></div>
+    <div class="reader__panel" role="dialog" aria-modal="true" aria-label="Essay">
+      <button class="reader__close" data-reader-close aria-label="Close">✕</button>
+      <div class="reader__scroll">
+        <header class="reader__head">
+          <p class="reader__meta mono" id="reader-meta"></p>
+          <h2 class="display reader__title" id="reader-title"></h2>
+        </header>
+        <div class="reader__body prose" id="reader-body"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- rendered essays (hidden in the page, cloned into the reader; also SEO) -->
+  <div class="writing-src" aria-hidden="true">
+    {renderedPosts.map((rp, i) => (
+      <article class="writing-doc" data-windex={i} data-title={rp.post.data.title} data-date={fmt(rp.post.data.date)}>
+        <div class="prose"><rp.Content /></div>
+      </article>
+    ))}
+  </div>
+
   <div class="sr-only">
     <h2>Books</h2>
-    <ul>
-      {books.map((b) => (
-        <li>
-          <strong>{b.data.title}</strong> — {b.data.author} ({b.data.status}{b.data.rating ? `, ${b.data.rating}/5` : ''}).
-          {strip(b.body ?? '')}
-        </li>
-      ))}
-    </ul>
-    <h2>Writing</h2>
-    <ul>
-      {posts.map((p) => (
-        <li><strong>{p.data.title}</strong> ({new Date(p.data.date).toISOString().slice(0, 10)}). {strip(p.body ?? '')}</li>
-      ))}
-    </ul>
+    <ul>{books.map((b) => (<li><strong>{b.data.title}</strong> — {b.data.author}. {strip(b.body ?? '')}</li>))}</ul>
   </div>
 
   <script type="application/json" id="library-data" set:html={JSON.stringify(payload)}></script>
@@ -64,12 +77,57 @@ const payload = { books: shelfData, writings: writingData };
   .lib { padding-top: 6.5rem; }
   .lib__head { text-align: center; }
   .lib__title { font-size: clamp(2.4rem, 1.8rem + 4vw, 5rem); margin: 0.6rem 0 1rem; }
-  .lib__hint { font-size: 0.74rem; letter-spacing: 0.08em; max-width: 60ch; margin: 0 auto; }
-  .lib__stage {
-    width: 100%; height: clamp(520px, 82vh, 1000px); margin-top: 1.5rem;
-    background: radial-gradient(120% 90% at 50% 8%, rgba(0,153,255,0.06), transparent 60%);
-  }
+  .lib__hint { font-size: 0.74rem; letter-spacing: 0.08em; max-width: 64ch; margin: 0 auto; }
+  .lib__stage { width: 100%; height: clamp(540px, 84vh, 1040px); margin-top: 1.2rem;
+    background: radial-gradient(120% 90% at 50% 8%, rgba(0,153,255,0.06), transparent 60%); }
+  .writing-src { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0,0,0,0); }
   @media (max-width: 760px) { .lib { padding-top: 5.5rem; } }
+</style>
+
+<style is:global>
+  /* essay reader modal */
+  .reader { position: fixed; inset: 0; z-index: 200; display: grid; place-items: center; padding: clamp(1rem, 4vw, 3rem); }
+  .reader[hidden] { display: none; }
+  .reader__backdrop { position: absolute; inset: 0; background: rgba(4,6,12,0.72); backdrop-filter: blur(6px); opacity: 0; transition: opacity 0.4s var(--ease); }
+  .reader.show .reader__backdrop { opacity: 1; }
+  .reader__panel {
+    position: relative; z-index: 1; width: min(760px, 100%); max-height: 88vh; overflow: hidden;
+    border-radius: 8px; border: 1px solid rgba(120,96,48,0.5);
+    background:
+      radial-gradient(120% 60% at 50% 0%, rgba(255,250,235,0.06), transparent 60%),
+      linear-gradient(180deg, #efe6cd, #e6dabb);
+    box-shadow: 0 40px 120px -30px rgba(0,0,0,0.8), inset 0 0 60px rgba(120,90,40,0.12);
+    transform: translateY(18px) scale(0.98); opacity: 0; transition: transform 0.5s var(--ease), opacity 0.4s var(--ease);
+  }
+  .reader.show .reader__panel { transform: none; opacity: 1; }
+  .reader__close { position: absolute; top: 0.8rem; right: 0.9rem; z-index: 2; width: 34px; height: 34px; border-radius: 50%;
+    border: 1px solid rgba(80,60,30,0.3); background: rgba(255,250,235,0.5); color: #4a3a1c; cursor: pointer; font-size: 0.9rem; transition: background 0.3s, transform 0.3s; }
+  .reader__close:hover { background: #d9caa3; transform: rotate(90deg); }
+  .reader__scroll { max-height: 88vh; overflow-y: auto; padding: clamp(2rem, 5vw, 3.4rem); }
+  .reader__scroll::-webkit-scrollbar { width: 10px; }
+  .reader__scroll::-webkit-scrollbar-thumb { background: rgba(120,90,40,0.4); border-radius: 10px; }
+  .reader__head { border-bottom: 1px solid rgba(80,60,30,0.25); padding-bottom: 1.2rem; margin-bottom: 1.6rem; }
+  .reader__meta { font-size: 0.72rem; letter-spacing: 0.16em; text-transform: uppercase; color: #8a6a2a; }
+  .reader__title { font-size: clamp(2rem, 1.4rem + 2.4vw, 3rem); color: #241c0e; margin-top: 0.5rem; line-height: 1.05; }
+
+  /* ink-on-parchment prose */
+  .reader__body.prose { max-width: none; color: #2c2414; font-size: 1.12rem; line-height: 1.8; font-family: 'Instrument Serif', Georgia, serif; }
+  .reader__body.prose > * + * { margin-top: 1.3rem; }
+  .reader__body.prose h2 { font-size: 1.7rem; color: #1c1609; margin-top: 2.4rem; font-family: 'Instrument Serif', Georgia, serif; }
+  .reader__body.prose h3 { font-size: 1.35rem; color: #1c1609; margin-top: 1.8rem; }
+  .reader__body.prose strong { color: #1c1609; }
+  .reader__body.prose em { color: #6a4f1e; }
+  .reader__body.prose a { color: #7a4a12; text-decoration: underline; }
+  .reader__body.prose code { font-family: var(--mono); font-size: 0.86em; background: rgba(120,90,40,0.14); padding: 0.12em 0.4em; border-radius: 5px; color: #4a3210; }
+  .reader__body.prose pre { background: #2a2417; color: #e8dfc8; border-radius: 10px; padding: 1.1rem; overflow-x: auto; }
+  .reader__body.prose pre code { background: none; color: inherit; }
+  .reader__body.prose blockquote { border-left: 3px solid #b6924a; padding-left: 1.1rem; font-style: italic; color: #5a4620; }
+  .reader__body.prose ol, .reader__body.prose ul { padding-left: 1.4rem; }
+  .reader__body.prose li { margin-top: 0.5rem; }
+  .reader__body.prose li::marker { color: #9a7a30; }
+  .reader__body.prose hr { border: 0; border-top: 1px solid rgba(80,60,30,0.25); margin: 2rem 0; }
+  .reader__body.prose .footnotes { margin-top: 2.4rem; padding-top: 1.2rem; border-top: 1px solid rgba(80,60,30,0.25); font-size: 0.92rem; }
+  @media (prefers-reduced-motion: reduce) { .reader__panel, .reader__backdrop { transition: none; } }
 </style>
 
 <script>
@@ -81,4 +139,42 @@ const payload = { books: shelfData, writings: writingData };
   if (payload.books?.length) {
     mount('#library', (h) => library3D(h, payload), { bloom: { strength: 0.22, radius: 0.5, threshold: 0.92 } });
   }
+
+  // ---- essay reader modal ----
+  const reader = document.getElementById('reader');
+  const body = document.getElementById('reader-body');
+  const titleEl = document.getElementById('reader-title');
+  const metaEl = document.getElementById('reader-meta');
+  let openTimer: number | undefined;
+
+  const showReader = (ref: number) => {
+    const src = document.querySelector(`.writing-doc[data-windex="${ref}"]`);
+    if (!src || !reader || !body) return;
+    body.innerHTML = src.querySelector('.prose')?.innerHTML ?? '';
+    if (titleEl) titleEl.textContent = src.getAttribute('data-title') || '';
+    if (metaEl) metaEl.textContent = `Essay · ${src.getAttribute('data-date') || ''}`;
+    reader.hidden = false;
+    requestAnimationFrame(() => reader.classList.add('show'));
+  };
+  const hideReader = () => {
+    if (!reader) return;
+    reader.classList.remove('show');
+    clearTimeout(openTimer);
+    openTimer = window.setTimeout(() => (reader.hidden = true), 420);
+    window.dispatchEvent(new CustomEvent('book:set', { detail: -1 })); // re-roll the 3D scroll
+  };
+
+  window.addEventListener('library:open', (e) => {
+    const { kind, ref } = (e as CustomEvent).detail || {};
+    if (kind === 'scroll' && ref >= 0) {
+      // let the 3D scroll start unrolling, then bring up the readable page
+      clearTimeout(openTimer);
+      openTimer = window.setTimeout(() => showReader(ref), 650);
+    } else if (kind !== 'scroll') {
+      reader?.classList.remove('show');
+      if (reader) openTimer = window.setTimeout(() => (reader.hidden = true), 420);
+    }
+  });
+  document.querySelectorAll('[data-reader-close]').forEach((b) => b.addEventListener('click', hideReader));
+  document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && reader && !reader.hidden) hideReader(); });
 </script>

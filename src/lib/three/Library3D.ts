@@ -201,6 +201,8 @@ function labelTexture(text: string): THREE.CanvasTexture {
 interface Item {
   group: THREE.Group; index: number; shelfPos: THREE.Vector3;
   apply: (p: number, isHot: boolean) => void;
+  dur: number;                 // seconds for the full open/close morph
+  kind: 'book' | 'scroll'; ref: number;  // ref = index into books / writings
   textures: THREE.Texture[]; mats: THREE.Material[];
 }
 
@@ -256,10 +258,10 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   if (hasWriting) {
     const boardTop = rowCenterY(0) - ROW_H / 2 + 0.2;
     let x = -((writings.length - 1) * SLOT) / 2;
-    for (const w of writings) {
-      items.push(buildScroll(w, items.length, new THREE.Vector3(x, boardTop + 2.7, 0.4)));
+    writings.forEach((w, wi) => {
+      items.push(buildScroll(w, items.length, wi, new THREE.Vector3(x, boardTop + 2.7, 0.4)));
       x += SLOT;
-    }
+    });
     // WRITING nameplate on the back panel
     const lt = labelTexture('WRITING'); extra.tex.push(lt);
     const lm = new THREE.MeshBasicMaterial({ map: lt, transparent: true }); extra.mat.push(lm);
@@ -271,15 +273,15 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   // ---- book shelves ----
   for (let r = 0; r < bookRows; r++) {
     const rowBooks = books.slice(r * perShelf, (r + 1) * perShelf);
-    let totW = 0; rowBooks.forEach((_, k) => (totW += thicknessOf(r * perShelf + k) + 0.18));
+    let totW = 0; rowBooks.forEach((_, k) => (totW += thicknessOf(r * perShelf + k) + 0.04));
     let x = -totW / 2;
     const y = rowCenterY(r + (hasWriting ? 1 : 0));
     rowBooks.forEach((book, k) => {
       const idx = r * perShelf + k;
       const T = thicknessOf(idx), H = 6.0 + ((idx * 7) % 10) * 0.14;
-      x += T / 2 + 0.09;
-      items.push(buildBook(book, items.length, new THREE.Vector3(x, y - ROW_H / 2 + H / 2 + 0.3, 0), T, H, COVER_W));
-      x += T / 2 + 0.09;
+      x += T / 2 + 0.02;
+      items.push(buildBook(book, items.length, idx, new THREE.Vector3(x, y - ROW_H / 2 + H / 2 + 0.3, 0), T, H, COVER_W));
+      x += T / 2 + 0.02;
     });
   }
 
@@ -292,7 +294,7 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   addBox(root, 0.7, caseH, depth, caseW / 2 - 0.35, 0, 0, wood);                                // right side
   addBox(root, caseW, caseH, 0.4, 0, 0, -depth / 2 + 0.1, woodDark);                            // back panel
 
-  function buildBook(book: BookData, index: number, shelfPos: THREE.Vector3, T: number, H: number, W: number): Item {
+  function buildBook(book: BookData, index: number, ref: number, shelfPos: THREE.Vector3, T: number, H: number, W: number): Item {
     const group = new THREE.Group();
     group.position.copy(shelfPos);
     group.rotation.y = Math.PI / 2; // spine faces the camera on the shelf
@@ -302,7 +304,7 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     const sTex = spineTexture(book), cTex = coverTexture(book), lTex = leftPage(book), rTex = rightPage(book);
     textures.push(sTex, cTex, lTex, rTex);
     const spineMat = mk(new THREE.MeshStandardMaterial({ map: sTex, roughness: 0.6 }));
-    const paperEdge = mk(new THREE.MeshStandardMaterial({ color: 0xe8e0c8, roughness: 0.9 }));
+    const paperEdge = mk(new THREE.MeshStandardMaterial({ color: 0x8f876a, roughness: 0.95 }));
     const coverPlain = mk(new THREE.MeshStandardMaterial({ color: new THREE.Color(book.spine).offsetHSL(0, 0, -0.05), roughness: 0.7 }));
     const Tb = T * 0.62, Tc = T * 0.3;
     const base = new THREE.Mesh(new THREE.BoxGeometry(W, H, Tb),
@@ -334,10 +336,10 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
         cover.rotation.y = smoothstep(0.6, 1, p) * Math.PI;
       }
     };
-    return { group, index, shelfPos: shelfPos.clone(), apply, textures, mats };
+    return { group, index, shelfPos: shelfPos.clone(), apply, dur: 3.4, kind: 'book', ref, textures, mats };
   }
 
-  function buildScroll(w: WritingData, index: number, shelfPos: THREE.Vector3): Item {
+  function buildScroll(w: WritingData, index: number, ref: number, shelfPos: THREE.Vector3): Item {
     const group = new THREE.Group();
     group.position.copy(shelfPos);
     const textures: THREE.Texture[] = [];
@@ -397,7 +399,7 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
         botRod.position.y = -Hp * unroll;
       }
     };
-    return { group, index, shelfPos: shelfPos.clone(), apply, textures, mats };
+    return { group, index, shelfPos: shelfPos.clone(), apply, dur: 4.6, kind: 'scroll', ref, textures, mats };
   }
 
   // ---- camera fit ----
@@ -425,7 +427,11 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     const r = renderer.domElement.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1));
   };
-  const setSel = (i: number) => { selected = i; window.dispatchEvent(new CustomEvent('book:select', { detail: i })); };
+  const setSel = (i: number) => {
+    selected = i;
+    const it = i >= 0 ? items[i] : null;
+    window.dispatchEvent(new CustomEvent('library:open', { detail: it ? { kind: it.kind, ref: it.ref } : { kind: null, ref: -1 } }));
+  };
   const onClick = () => {
     if (selected >= 0) { if (hovered >= 0 && hovered !== selected) setSel(hovered); else setSel(-1); }
     else if (hovered >= 0) setSel(hovered);
@@ -435,26 +441,24 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   const onExternal = (e: Event) => setSel((e as CustomEvent).detail);
   window.addEventListener('book:set', onExternal);
 
-  let lastHover = -1;
-  onFrame(() => {
-    const open = selected >= 0 && anim[selected] > 0.25;
+  onFrame((_t, dt) => {
+    const open = selected >= 0 && anim[selected] > 0.2;
     ray.setFromCamera(ndc, camera);
     const hit = open ? null : ray.intersectObjects(hitMeshes, true)[0];
     let h = -1;
     if (hit) { let o: THREE.Object3D | null = hit.object; while (o && o.userData.index === undefined) o = o.parent; if (o) h = o.userData.index; }
     hovered = h;
     renderer.domElement.style.cursor = hovered >= 0 || open ? 'pointer' : 'default';
-    if (hovered !== lastHover && !open) { lastHover = hovered; window.dispatchEvent(new CustomEvent('book:hover', { detail: hovered })); }
 
+    // time-based morph so it's slow + buttery smooth (frame-rate independent)
+    const d = Math.min(dt, 0.05);
     for (const it of items) {
-      const isSel = it.index === selected;
-      anim[it.index] = THREE.MathUtils.lerp(anim[it.index], isSel ? 1 : 0, 0.1);
+      const dir = it.index === selected ? 1 : -1;
+      anim[it.index] = Math.min(1, Math.max(0, anim[it.index] + (dir * d) / it.dur));
       it.apply(anim[it.index], it.index === hovered && !open && anim[it.index] < 0.02);
     }
-
-    const px = open ? 0 : ctx.pointer.x * 0.28, py = open ? 0 : -ctx.pointer.y * 0.14;
-    root.rotation.y = THREE.MathUtils.lerp(root.rotation.y, px, 0.05);
-    root.rotation.x = THREE.MathUtils.lerp(root.rotation.x, py, 0.05);
+    // The bookcase intentionally does NOT react to the cursor — moving it makes
+    // the interaction janky. Keep it perfectly still. (Per Andrew's request.)
   });
 
   onDispose(() => {
