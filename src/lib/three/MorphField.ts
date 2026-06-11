@@ -92,6 +92,71 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   const points = new THREE.Points(geo, mat);
   group.add(points);
 
+  // ---- morphing bond web: link each particle to ~2 nearest neighbours ----
+  // Bonds follow the live particle positions, so the web reshapes as the cloud
+  // morphs into a helix, a ring, an orbital… and long bonds fade out.
+  const base0 = targets[0].p;
+  const CS = R / 3.5;
+  const grid = new Map<string, number[]>();
+  const gkey = (x: number, y: number, z: number) => `${Math.round(x / CS)}|${Math.round(y / CS)}|${Math.round(z / CS)}`;
+  for (let i = 0; i < N; i++) {
+    const k = gkey(base0[i * 3], base0[i * 3 + 1], base0[i * 3 + 2]);
+    let a = grid.get(k); if (!a) { a = []; grid.set(k, a); } a.push(i);
+  }
+  const edges: number[] = [];
+  const seen = new Set<number>();
+  for (let i = 0; i < N; i++) {
+    const x = base0[i * 3], y = base0[i * 3 + 1], z = base0[i * 3 + 2];
+    let b0 = -1, b1 = -1, d0 = 1e9, d1 = 1e9;
+    const cx = Math.round(x / CS), cy = Math.round(y / CS), cz = Math.round(z / CS);
+    for (let dx = -1; dx <= 1; dx++) for (let dy = -1; dy <= 1; dy++) for (let dz = -1; dz <= 1; dz++) {
+      const c = grid.get(`${cx + dx}|${cy + dy}|${cz + dz}`); if (!c) continue;
+      for (const j of c) {
+        if (j === i) continue;
+        const ux = x - base0[j * 3], uy = y - base0[j * 3 + 1], uz = z - base0[j * 3 + 2];
+        const d = ux * ux + uy * uy + uz * uz;
+        if (d < d0) { d1 = d0; b1 = b0; d0 = d; b0 = j; } else if (d < d1) { d1 = d; b1 = j; }
+      }
+    }
+    for (const j of [b0, b1]) {
+      if (j < 0) continue;
+      const k = i < j ? i * N + j : j * N + i;
+      if (seen.has(k)) continue; seen.add(k); edges.push(i, j);
+    }
+  }
+  const eCount = edges.length / 2;
+  const edgePos = new Float32Array(eCount * 6);
+  const edgeCol = new Float32Array(eCount * 6);
+  const edgeGeo = new THREE.BufferGeometry();
+  edgeGeo.setAttribute('position', new THREE.BufferAttribute(edgePos, 3).setUsage(THREE.DynamicDrawUsage));
+  edgeGeo.setAttribute('color', new THREE.BufferAttribute(edgeCol, 3).setUsage(THREE.DynamicDrawUsage));
+  const edgeMat = new THREE.LineBasicMaterial({ vertexColors: true, transparent: true, opacity: 0.55, blending: THREE.AdditiveBlending, depthWrite: false });
+  const web = new THREE.LineSegments(edgeGeo, edgeMat);
+  group.add(web);
+  const linkMax = R * 0.85, linkMax2 = linkMax * linkMax;
+  const updateWeb = () => {
+    for (let e = 0; e < eCount; e++) {
+      const a = edges[e * 2], b = edges[e * 2 + 1];
+      const ax = positions[a * 3], ay = positions[a * 3 + 1], az = positions[a * 3 + 2];
+      const bx = positions[b * 3], by = positions[b * 3 + 1], bz = positions[b * 3 + 2];
+      edgePos[e * 6] = ax; edgePos[e * 6 + 1] = ay; edgePos[e * 6 + 2] = az;
+      edgePos[e * 6 + 3] = bx; edgePos[e * 6 + 4] = by; edgePos[e * 6 + 5] = bz;
+      const ux = ax - bx, uy = ay - by, uz = az - bz, d2 = ux * ux + uy * uy + uz * uz;
+      const f = d2 > linkMax2 ? 0 : (1 - Math.sqrt(d2) / linkMax) * 0.7;
+      edgeCol[e * 6] = colors[a * 3] * f; edgeCol[e * 6 + 1] = colors[a * 3 + 1] * f; edgeCol[e * 6 + 2] = colors[a * 3 + 2] * f;
+      edgeCol[e * 6 + 3] = colors[b * 3] * f; edgeCol[e * 6 + 4] = colors[b * 3 + 1] * f; edgeCol[e * 6 + 5] = colors[b * 3 + 2] * f;
+    }
+    edgeGeo.attributes.position.needsUpdate = true;
+    edgeGeo.attributes.color.needsUpdate = true;
+  };
+
+  // ---- glowing core ----
+  const core = new THREE.Mesh(
+    new THREE.IcosahedronGeometry(1.6, 3),
+    new THREE.MeshBasicMaterial({ color: PALETTE.cyan, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending }),
+  );
+  group.add(core);
+
   // faint structural shell for depth
   const shell = new THREE.LineSegments(
     new THREE.EdgesGeometry(new THREE.IcosahedronGeometry(R * 1.35, 1)),
@@ -147,7 +212,12 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
       }
       geo.attributes.position.needsUpdate = true;
       geo.attributes.aColor.needsUpdate = true;
+      updateWeb();
     }
+
+    // pulsing core
+    core.scale.setScalar(1 + 0.22 * Math.sin(t * 1.8));
+    (core.material as THREE.MeshBasicMaterial).opacity = 0.6 + 0.25 * Math.sin(t * 1.8 + 1);
 
     // notify the page which field we're in
     const stageIdx = Math.round(sf);
@@ -166,5 +236,9 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
     camera.lookAt(0, 0, 0);
   });
 
-  onDispose(() => { geo.dispose(); mat.dispose(); });
+  onDispose(() => {
+    geo.dispose(); mat.dispose();
+    edgeGeo.dispose(); edgeMat.dispose();
+    core.geometry.dispose(); (core.material as THREE.Material).dispose();
+  });
 }
