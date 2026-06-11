@@ -7,7 +7,8 @@ import { url } from '@/lib/site';
 
 type SceneName =
   | 'network' | 'molecule' | 'protein' | 'density' | 'landscape'
-  | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice';
+  | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice'
+  | 'threebody' | 'rubiks';
 
 interface Props {
   name: SceneName;
@@ -32,6 +33,8 @@ const labels: Record<SceneName, string> = {
   helix: 'A DNA double helix turning slowly.',
   statmech: 'A box of gas particles colored by speed — a live Maxwell–Boltzmann distribution.',
   lattice: 'A crystalline lattice of atoms.',
+  threebody: 'Three masses orbiting under gravity, leaving glowing trails — the chaotic three-body problem.',
+  rubiks: 'A Rubik’s cube turning its layers.',
 };
 ---
 

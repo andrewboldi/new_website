@@ -101,6 +101,26 @@ const courseScene: Record<string, string> = {
     </div>
   </section>
 
+  <!-- ===== CURIOSITIES ===== -->
+  <section class="section curio">
+    <div class="wrap">
+      <header class="sec-head">
+        <p class="eyebrow" data-reveal>Curiosities</p>
+        <h2 class="display sec-title" data-reveal>Things I play with.</h2>
+      </header>
+      <div class="curio__grid">
+        <article class="curio__tile card ticks" data-reveal>
+          <div class="curio__scene"><Scene name="rubiks" /></div>
+          <p class="curio__cap">Speedcubing — 9.42s, and solved blindfolded. 2×2 through 7×7, Megaminx, Square-1.</p>
+        </article>
+        <article class="curio__tile card ticks" data-reveal data-reveal-delay="120">
+          <div class="curio__scene"><Scene name="threebody" /></div>
+          <p class="curio__cap">The three-body problem — chasing conserved quantities in deterministic chaos.</p>
+        </article>
+      </div>
+    </div>
+  </section>
+
   <!-- ===== COURSEWORK ===== -->
   <section class="section course">
     <div class="wrap">
@@ -147,6 +167,13 @@ const courseScene: Record<string, string> = {
   .protein-feature__cap { position: relative; z-index: 2; pointer-events: none; }
   .protein-feature__title { font-size: clamp(2rem, 1.4rem + 3.4vw, 4rem); margin: 0.6rem 0 1rem; text-shadow: 0 4px 40px var(--bg); }
   .protein-feature__sub { max-width: 42ch; }
+
+  /* curiosities */
+  .curio__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; }
+  .curio__tile { padding: 0; overflow: hidden; }
+  .curio__scene { height: 300px; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
+  .curio__cap { padding: 1rem 1.4rem 1.4rem; font-size: 0.92rem; color: var(--ink-dim); }
+  @media (max-width: 760px) { .curio__grid { grid-template-columns: 1fr; } }
 
   /* polymath */
   .poly__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }

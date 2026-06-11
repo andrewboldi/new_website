@@ -1,0 +1,66 @@
+---
+import Base from '@/layouts/Base.astro';
+import PageHeader from '@/components/PageHeader.astro';
+import MorphBackground from '@/components/MorphBackground.astro';
+
+const now = [
+  {
+    head: 'Working',
+    items: [
+      'Molecular machine learning for drug discovery at Soley Therapeutics — explainability, generative chemistry, and foundation models for molecular property prediction.',
+      'A side project on AI for total synthesis: building reaction datasets and route search at scale.',
+    ],
+  },
+  {
+    head: 'Studying',
+    items: [
+      'Finishing a B.S. in Chemical Biology and a B.A. in Computer Science at UC Berkeley (June 2027).',
+      'This term: Deep Neural Networks (CS182), Computer Vision (CS180), Physical Chemistry (statistical mechanics), Molecular Biology Lab.',
+    ],
+  },
+  {
+    head: 'Thinking about',
+    items: [
+      'How relevance propagates through attention, and what it says about what models actually learn.',
+      'Reasoning as synthetic data — boiling knowledge down to axioms, then building back up.',
+    ],
+  },
+  {
+    head: 'Away from the screen',
+    items: [
+      'At the piano (and the occasional Carnegie Hall flashback).',
+      'Shaving seconds off cube solves; reading across biology, ML, and physics.',
+    ],
+  },
+];
+---
+
+<Base title="Now" description="What Andrew Boldi is focused on right now.">
+  <MorphBackground />
+  <div class="page-body page-body--solidtop">
+    <PageHeader
+      eyebrow="Now · this season"
+      title="What I’m focused<br/>on right now."
+      lede="A snapshot of where my attention is — inspired by Derek Sivers' /now pages. Last refreshed this term."
+    />
+    <section class="section nowpage">
+      <div class="wrap nowpage__grid">
+        {now.map((g, i) => (
+          <div class="nowblock" data-reveal data-reveal-delay={i * 70}>
+            <p class="eyebrow">{g.head}</p>
+            <ul>{g.items.map((it) => <li>{it}</li>)}</ul>
+          </div>
+        ))}
+      </div>
+    </section>
+  </div>
+</Base>
+
+<style>
+  .nowpage__grid { display: grid; grid-template-columns: 1fr 1fr; gap: 2.5rem 3rem; }
+  .nowblock .eyebrow { margin-bottom: 1rem; }
+  .nowblock ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.9rem; }
+  .nowblock li { position: relative; padding-left: 1.3rem; color: #c6d0e4; font-size: 1.02rem; line-height: 1.6; }
+  .nowblock li::before { content: '→'; position: absolute; left: 0; color: var(--cyan); }
+  @media (max-width: 760px) { .nowpage__grid { grid-template-columns: 1fr; } }
+</style>

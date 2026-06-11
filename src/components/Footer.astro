@@ -14,6 +14,7 @@ const year = new Date().getFullYear();
     <nav class="foot__col" aria-label="Pages">
       <p class="eyebrow">Pages</p>
       {NAV.map((i) => <a href={url(i.path)}>{i.label}</a>)}
+      <a href={url('/now')}>Now</a>
     </nav>
 
     <nav class="foot__col" aria-label="Elsewhere">

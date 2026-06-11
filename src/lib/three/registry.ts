@@ -6,7 +6,8 @@ import { mount, type CreateSceneOpts } from './core';
 
 export type SceneName =
   | 'network' | 'molecule' | 'protein' | 'density' | 'landscape'
-  | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice';
+  | 'neuralnet' | 'signal' | 'orbital' | 'helix' | 'statmech' | 'lattice'
+  | 'threebody' | 'rubiks';
 
 type BloomOpts = NonNullable<CreateSceneOpts['bloom']>;
 
@@ -22,6 +23,8 @@ const BLOOM: Record<SceneName, BloomOpts> = {
   helix: { strength: 0.6, radius: 0.5, threshold: 0.07 },
   statmech: { strength: 0.7, radius: 0.55, threshold: 0.04 },
   lattice: { strength: 0.6, radius: 0.5, threshold: 0.07 },
+  threebody: { strength: 0.7, radius: 0.6, threshold: 0.05 },
+  rubiks: { strength: 0.15, radius: 0.4, threshold: 0.6 },
 };
 
 export async function mountScene(
@@ -62,6 +65,14 @@ export async function mountScene(
     case 'statmech': {
       const { statMech } = await import('./StatMech');
       return mount(host, (h) => statMech(h), { bloom });
+    }
+    case 'threebody': {
+      const { threeBody } = await import('./ThreeBody');
+      return mount(host, (h) => threeBody(h), { bloom });
+    }
+    case 'rubiks': {
+      const { rubiksCube } = await import('./RubiksCube');
+      return mount(host, (h) => rubiksCube(h), { bloom });
     }
     case 'orbital':
     case 'helix':
