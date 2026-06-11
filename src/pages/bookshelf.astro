@@ -1,200 +1,84 @@
 ---
 import Base from '@/layouts/Base.astro';
-import PageHeader from '@/components/PageHeader.astro';
-import { getCollection, render } from 'astro:content';
+import { getCollection } from 'astro:content';
 
-const books = (await getCollection('books')).sort((a, b) => a.data.order - b.data.order);
-const rendered = await Promise.all(books.map(async (b) => ({ ...b, ...(await render(b)) })));
-
-// data the 3D shelf needs (order matches the cards)
 const strip = (md: string) =>
   md.replace(/\[([^\]]+)\]\([^)]+\)/g, '$1').replace(/[*_`>#]/g, '').replace(/\s+/g, ' ').trim();
+
+const books = (await getCollection('books')).sort((a, b) => a.data.order - b.data.order);
 const shelfData = books.map((b) => ({
-  title: b.data.title,
-  author: b.data.author,
-  status: b.data.status,
-  rating: b.data.rating,
-  spine: b.data.spine,
-  tags: b.data.tags ?? [],
+  title: b.data.title, author: b.data.author, status: b.data.status,
+  rating: b.data.rating, spine: b.data.spine, tags: b.data.tags ?? [],
   review: strip(b.body ?? ''),
 }));
 
-const counts = {
-  reading: books.filter((b) => b.data.status === 'reading').length,
-  read: books.filter((b) => b.data.status === 'read').length,
-  queued: books.filter((b) => b.data.status === 'queued').length,
-};
-const stars = (r?: number) =>
-  r ? '★'.repeat(Math.round(r)) + '☆'.repeat(5 - Math.round(r)) : '';
+const posts = (await getCollection('blog'))
+  .filter((p) => !p.data.draft)
+  .sort((a, b) => +new Date(b.data.date) - +new Date(a.data.date));
+const writingData = posts.map((p) => ({
+  title: p.data.title,
+  date: new Date(p.data.date).toISOString().slice(0, 10),
+  body: strip(p.body ?? ''),
+  accent: '#caa86a',
+}));
+
+const payload = { books: shelfData, writings: writingData };
 ---
 
-<Base title="Bookshelf" description="Books shaping how Andrew Boldi thinks — biology, machine learning, chemistry, physics, and the occasional detour.">
-  <PageHeader
-    eyebrow="Bookshelf · a living shelf"
-    title="What I’m reading,<br/>and why."
-    lede="The books behind the ideas — biology, machine learning, chemistry, physics, and a few detours. Hover a spine to pull it out; click to read the note."
-  />
+<Base title="Library" description="Andrew Boldi's library — the books shaping how he thinks, and his writing as scrolls you can unroll.">
+  <section class="lib">
+    <header class="lib__head wrap">
+      <p class="eyebrow" data-reveal>The library</p>
+      <h1 class="display lib__title" data-reveal>Everything I’m<br/>reading &amp; writing.</h1>
+      <p class="lib__hint mono faint" data-reveal>
+        hover a spine to ease it out · click a book to open it · click a scroll on the top shelf to unroll an essay
+      </p>
+    </header>
 
-  <!-- ===== 3D SHELF ===== -->
-  <section class="shelf-wrap">
-    <div class="wrap">
-      <div class="shelf-host scene-host" id="shelf">
-        <div class="shelf-cap" id="shelf-cap" aria-hidden="true">
-          <span class="shelf-cap__title display"></span>
-          <span class="shelf-cap__meta mono"></span>
-        </div>
-      </div>
-      <div class="shelf-meta">
-        <p class="shelf-hint mono faint">drag-free · hover + click the spines</p>
-        <ul class="legend mono">
-          <li><span class="legend__dot" style="--c:#38e8c8"></span>Reading · {counts.reading}</li>
-          <li><span class="legend__dot" style="--c:#0099ff"></span>Read · {counts.read}</li>
-          <li><span class="legend__dot" style="--c:#9d7bff"></span>Queued · {counts.queued}</li>
-        </ul>
-      </div>
-    </div>
+    <div class="lib__stage scene-host" id="library"></div>
   </section>
 
-  <!-- ===== FILTERS ===== -->
-  <section class="wrap filters" id="filters">
-    <button class="filter is-active" data-filter="all">All ({books.length})</button>
-    <button class="filter" data-filter="reading">Reading</button>
-    <button class="filter" data-filter="read">Read</button>
-    <button class="filter" data-filter="queued">Queued</button>
-  </section>
+  <!-- accessible / no-JS / SEO copy of everything on the shelf -->
+  <div class="sr-only">
+    <h2>Books</h2>
+    <ul>
+      {books.map((b) => (
+        <li>
+          <strong>{b.data.title}</strong> — {b.data.author} ({b.data.status}{b.data.rating ? `, ${b.data.rating}/5` : ''}).
+          {strip(b.body ?? '')}
+        </li>
+      ))}
+    </ul>
+    <h2>Writing</h2>
+    <ul>
+      {posts.map((p) => (
+        <li><strong>{p.data.title}</strong> ({new Date(p.data.date).toISOString().slice(0, 10)}). {strip(p.body ?? '')}</li>
+      ))}
+    </ul>
+  </div>
 
-  <!-- ===== BOOK CARDS ===== -->
-  <section class="section books">
-    <div class="wrap">
-      <div class="books__grid">
-        {rendered.map((b, i) => (
-          <article
-            class={`card ticks book book--${b.data.status}`}
-            id={`book-${i}`}
-            data-index={i}
-            data-status={b.data.status}
-            style={`--spine:${b.data.spine}`}
-          >
-            <div class="book__bar"></div>
-            <div class="book__head">
-              <span class={`book__status book__status--${b.data.status}`}>{b.data.status}</span>
-              {b.data.rating && <span class="book__stars" title={`${b.data.rating} / 5`}>{stars(b.data.rating)}</span>}
-            </div>
-            <h2 class="book__title display">{b.data.title}</h2>
-            <p class="book__author mono">{b.data.author}</p>
-            <div class="book__review prose"><b.Content /></div>
-            <div class="book__tags">{b.data.tags.map((t) => <span class="tag">{t}</span>)}</div>
-          </article>
-        ))}
-      </div>
-    </div>
-  </section>
-
-  <script type="application/json" id="shelf-data" set:html={JSON.stringify(shelfData)}></script>
+  <script type="application/json" id="library-data" set:html={JSON.stringify(payload)}></script>
 </Base>
 
 <style>
-  .shelf-wrap { padding-top: 1rem; }
-  .shelf-host { position: relative; width: 100%; height: clamp(360px, 56vh, 620px); border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(120% 100% at 50% 0%, rgba(0,153,255,0.07), transparent 60%), linear-gradient(180deg, var(--surface), var(--bg-2)); }
-  .shelf-cap {
-    position: absolute; top: 1.2rem; left: 50%; transform: translateX(-50%) translateY(-8px);
-    z-index: 3; display: flex; flex-direction: column; align-items: center; gap: 0.3rem;
-    text-align: center; pointer-events: none; opacity: 0; transition: opacity 0.3s var(--ease), transform 0.3s var(--ease);
-    padding: 0.7rem 1.3rem; border-radius: 12px;
-    background: color-mix(in srgb, var(--bg) 78%, transparent); backdrop-filter: blur(8px);
-    border: 1px solid var(--line-2); max-width: min(90%, 480px);
+  .lib { padding-top: 6.5rem; }
+  .lib__head { text-align: center; }
+  .lib__title { font-size: clamp(2.4rem, 1.8rem + 4vw, 5rem); margin: 0.6rem 0 1rem; }
+  .lib__hint { font-size: 0.74rem; letter-spacing: 0.08em; max-width: 60ch; margin: 0 auto; }
+  .lib__stage {
+    width: 100%; height: clamp(520px, 82vh, 1000px); margin-top: 1.5rem;
+    background: radial-gradient(120% 90% at 50% 8%, rgba(0,153,255,0.06), transparent 60%);
   }
-  .shelf-cap.show { opacity: 1; transform: translateX(-50%) translateY(0); }
-  .shelf-cap__title { font-size: 1.3rem; line-height: 1.05; color: var(--ink); }
-  .shelf-cap__meta { font-size: 0.7rem; letter-spacing: 0.06em; color: var(--cyan); text-transform: uppercase; }
-  .shelf-meta { display: flex; justify-content: space-between; align-items: center; margin-top: 1rem; gap: 1rem; flex-wrap: wrap; }
-  .shelf-hint { font-size: 0.72rem; letter-spacing: 0.1em; }
-  .legend { list-style: none; display: flex; gap: 1.4rem; margin: 0; padding: 0; font-size: 0.74rem; color: var(--ink-dim); }
-  .legend li { display: flex; align-items: center; gap: 0.45rem; }
-  .legend__dot { width: 9px; height: 9px; border-radius: 50%; background: var(--c); box-shadow: 0 0 10px var(--c); }
-
-  .filters { display: flex; gap: 0.6rem; margin-top: 3rem; flex-wrap: wrap; }
-  .filter { font-family: var(--mono); font-size: 0.78rem; padding: 0.5em 1.1em; border-radius: 100px; border: 1px solid var(--line-2); background: transparent; color: var(--ink-dim); cursor: pointer; transition: color 0.3s, border-color 0.3s, background 0.3s; }
-  .filter:hover { color: var(--ink); border-color: var(--cyan); }
-  .filter.is-active { color: var(--bg); background: var(--cyan); border-color: var(--cyan); font-weight: 600; }
-
-  .books { padding-top: 2.5rem; }
-  .books__grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(330px, 1fr)); gap: 1rem; }
-  .book { position: relative; overflow: hidden; padding-left: 1.6rem; transition: border-color 0.4s, transform 0.4s var(--ease), box-shadow 0.4s; scroll-margin-top: 6rem; }
-  .book__bar { position: absolute; left: 0; top: 0; bottom: 0; width: 6px; background: var(--spine); }
-  .book.is-selected { border-color: var(--cyan); box-shadow: 0 0 0 1px var(--cyan), 0 18px 50px -20px rgba(56,232,200,0.4); transform: translateY(-3px); }
-  .book__head { display: flex; justify-content: space-between; align-items: center; }
-  .book__status { font-family: var(--mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.16em; padding: 0.25em 0.7em; border-radius: 100px; border: 1px solid var(--line-2); }
-  .book__status--reading { color: var(--cyan); border-color: rgba(56,232,200,0.4); }
-  .book__status--read { color: var(--blue-soft); border-color: rgba(0,153,255,0.4); }
-  .book__status--queued { color: var(--violet); border-color: rgba(157,123,255,0.4); }
-  .book__stars { color: #ffd27a; font-size: 0.86rem; letter-spacing: 0.1em; }
-  .book__title { font-size: 1.5rem; margin-top: 0.9rem; line-height: 1.05; }
-  .book__author { color: var(--ink-faint); font-size: 0.78rem; margin-top: 0.3rem; }
-  .book__review { margin-top: 1rem; font-size: 0.95rem; max-width: none; color: #c2cce0; line-height: 1.65; }
-  .book__review :global(p) { margin: 0; }
-  .book__tags { display: flex; gap: 0.4rem; flex-wrap: wrap; margin-top: 1.1rem; }
-  .book.is-hidden { display: none; }
+  @media (max-width: 760px) { .lib { padding-top: 5.5rem; } }
 </style>
 
 <script>
   import { mount } from '@/lib/three/core';
-  import { bookshelf3D, type BookData } from '@/lib/three/Bookshelf3D';
+  import { library3D } from '@/lib/three/Library3D';
 
-  const dataEl = document.getElementById('shelf-data');
-  const books: BookData[] = dataEl ? JSON.parse(dataEl.textContent || '[]') : [];
-
-  if (books.length) {
-    mount('#shelf', (h) => bookshelf3D(h, books), { bloom: { strength: 0.22, radius: 0.5, threshold: 0.9 } });
+  const el = document.getElementById('library-data');
+  const payload = el ? JSON.parse(el.textContent || '{}') : { books: [], writings: [] };
+  if (payload.books?.length) {
+    mount('#library', (h) => library3D(h, payload), { bloom: { strength: 0.22, radius: 0.5, threshold: 0.92 } });
   }
-
-  // 3D hover -> crisp DOM caption
-  const cap = document.getElementById('shelf-cap');
-  const capTitle = cap?.querySelector('.shelf-cap__title') as HTMLElement | null;
-  const capMeta = cap?.querySelector('.shelf-cap__meta') as HTMLElement | null;
-  window.addEventListener('book:hover', (e) => {
-    const idx = (e as CustomEvent).detail as number;
-    if (idx >= 0 && books[idx] && cap) {
-      const b = books[idx];
-      if (capTitle) capTitle.textContent = b.title;
-      if (capMeta) capMeta.textContent = `${b.author} · ${b.status}${b.rating ? ` · ${b.rating}★` : ''}`;
-      cap.classList.add('show');
-    } else {
-      cap?.classList.remove('show');
-    }
-  });
-
-  // 3D selection -> highlight + scroll the matching card
-  const cards = Array.from(document.querySelectorAll<HTMLElement>('.book'));
-  // the review now opens on the 3D book itself; just mirror the selection on the
-  // cards below (no scroll — that would yank the reader out of view).
-  window.addEventListener('book:select', (e) => {
-    const idx = (e as CustomEvent).detail as number;
-    cards.forEach((c) => c.classList.remove('is-selected'));
-    if (idx >= 0 && cards[idx]) cards[idx].classList.add('is-selected');
-  });
-
-  // card click -> pop the spine out on the shelf
-  cards.forEach((card, i) => {
-    card.addEventListener('click', () => {
-      const already = card.classList.contains('is-selected');
-      cards.forEach((c) => c.classList.remove('is-selected'));
-      if (!already) card.classList.add('is-selected');
-      window.dispatchEvent(new CustomEvent('book:set', { detail: already ? -1 : i }));
-    });
-  });
-
-  // filters
-  const filterBtns = document.querySelectorAll<HTMLButtonElement>('.filter');
-  filterBtns.forEach((btn) => {
-    btn.addEventListener('click', () => {
-      filterBtns.forEach((b) => b.classList.remove('is-active'));
-      btn.classList.add('is-active');
-      const f = btn.dataset.filter;
-      cards.forEach((c) => {
-        const show = f === 'all' || c.dataset.status === f;
-        c.classList.toggle('is-hidden', !show);
-      });
-    });
-  });
 </script>

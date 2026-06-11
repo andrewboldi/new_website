@@ -111,9 +111,10 @@ import { EXPERIENCE, PROJECTS } from '@/lib/data';
 
   /* interlude */
   .interlude { position: relative; min-height: 70vh; display: flex; align-items: center; overflow: hidden; margin: 3rem 0; }
-  .interlude__scene { z-index: 0; left: 30%; }
+  /* anchor the molecule's canvas to the right half so it clears the quote */
+  .interlude__scene { z-index: 0; left: auto; right: 0; width: 52%; }
   .interlude__text { position: relative; z-index: 2; pointer-events: none; }
-  @media (max-width: 860px) { .interlude__scene { left: 0; opacity: 0.5; } }
+  @media (max-width: 860px) { .interlude__scene { left: 0; right: 0; width: auto; opacity: 0.45; } }
   .interlude__quote { font-size: clamp(1.6rem, 1.2rem + 2.6vw, 3.4rem); max-width: 24ch; margin-top: 1rem; text-shadow: 0 4px 40px var(--bg); }
   .interlude__quote em { font-style: italic; color: var(--cyan-soft); }
   .interlude__cap { margin-top: 1.2rem; font-size: 0.72rem; letter-spacing: 0.08em; color: var(--cyan); text-shadow: 0 2px 20px var(--bg); }
