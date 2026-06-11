@@ -9,7 +9,84 @@ import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
+import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
+import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+
+/**
+ * Combined filmic-finish pass (one fullscreen draw, runs in LINEAR space before
+ * OutputPass): subtle vignette to focus the eye, faint animated film grain, and
+ * a light ordered (Bayer 4x4) dither to kill banding in dark gradients. Kept
+ * deliberately gentle — Andrew dislikes heavy-handed grades / blown highlights.
+ */
+const FilmicFinishShader = {
+  uniforms: {
+    tDiffuse: { value: null as THREE.Texture | null },
+    uTime: { value: 0 },
+    uVignette: { value: 0.9 }, // outer darkening amount (0 = off)
+    uGrain: { value: 0.05 }, // grain amplitude in linear space
+    uDither: { value: 1.0 }, // dither amplitude in 1/255 units
+    uResolution: { value: new THREE.Vector2(1, 1) },
+  },
+  vertexShader: /* glsl */ `
+    varying vec2 vUv;
+    void main() {
+      vUv = uv;
+      gl_Position = projectionMatrix * modelViewMatrix * vec4( position, 1.0 );
+    }
+  `,
+  fragmentShader: /* glsl */ `
+    uniform sampler2D tDiffuse;
+    uniform float uTime;
+    uniform float uVignette;
+    uniform float uGrain;
+    uniform float uDither;
+    uniform vec2 uResolution;
+    varying vec2 vUv;
+
+    // hash-based pseudo noise for grain
+    float hash(vec2 p) {
+      p = fract(p * vec2(123.34, 456.21));
+      p += dot(p, p + 45.32);
+      return fract(p.x * p.y);
+    }
+
+    // 4x4 ordered (Bayer) dither matrix, normalized to [-0.5, 0.5]
+    float bayer(vec2 frag) {
+      int x = int(mod(frag.x, 4.0));
+      int y = int(mod(frag.y, 4.0));
+      int idx = x + y * 4;
+      float m[16];
+      m[0]=0.0;  m[1]=8.0;  m[2]=2.0;  m[3]=10.0;
+      m[4]=12.0; m[5]=4.0;  m[6]=14.0; m[7]=6.0;
+      m[8]=3.0;  m[9]=11.0; m[10]=1.0; m[11]=9.0;
+      m[12]=15.0;m[13]=7.0; m[14]=13.0;m[15]=5.0;
+      float v = 0.0;
+      for (int i = 0; i < 16; i++) { if (i == idx) v = m[i]; }
+      return v / 16.0 - 0.5;
+    }
+
+    void main() {
+      vec4 color = texture2D(tDiffuse, vUv);
+
+      // --- vignette (smooth radial falloff toward corners) ---
+      vec2 d = vUv - 0.5;
+      float vig = smoothstep(0.85, 0.25, dot(d, d) * 2.0);
+      vig = mix(1.0, vig, uVignette);
+      color.rgb *= vig;
+
+      // --- film grain (animated, luminance-aware so darks stay clean-ish) ---
+      float g = hash(vUv * uResolution + fract(uTime) * 137.0) - 0.5;
+      color.rgb += g * uGrain;
+
+      // --- ordered dither (breaks up gradient banding) ---
+      vec2 frag = vUv * uResolution;
+      color.rgb += bayer(frag) * (uDither / 255.0);
+
+      gl_FragColor = color;
+    }
+  `,
+};
 
 export const PALETTE = {
   bg: 0x06080f,
@@ -93,16 +170,27 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
 
   let composer: EffectComposer | null = null;
   let bloomPass: UnrealBloomPass | null = null;
+  let finishPass: ShaderPass | null = null;
   if (opts.bloom) {
     composer = new EffectComposer(renderer);
     composer.addPass(new RenderPass(scene, camera));
+    // Bloom (linear). Default threshold raised 0.1 -> 0.5 so only genuinely
+    // bright/emissive accents glow instead of washing the whole frame to mush.
     bloomPass = new UnrealBloomPass(
       new THREE.Vector2(width, height),
       opts.bloom.strength ?? 0.8,
       opts.bloom.radius ?? 0.5,
-      opts.bloom.threshold ?? 0.1,
+      opts.bloom.threshold ?? 0.5,
     );
     composer.addPass(bloomPass);
+    // Combined filmic finish: vignette + faint grain + ordered dither (linear).
+    finishPass = new ShaderPass(FilmicFinishShader);
+    finishPass.uniforms.uResolution.value.set(width, height);
+    composer.addPass(finishPass);
+    // Anti-aliasing: the composer bypasses native MSAA, so thin science
+    // geometry shimmers without this. SMAA runs in linear-srgb, before output.
+    composer.addPass(new SMAAPass());
+    // OutputPass stays LAST: the only tonemap (ACES) + linear->sRGB step.
     composer.addPass(new OutputPass());
   }
 
@@ -141,6 +229,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
       composer?.setSize(w, h);
+      finishPass?.uniforms.uResolution.value.set(w, h);
     });
   });
   ro.observe(host);
@@ -153,7 +242,10 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   );
   vis.observe(host);
 
-  const render = () => (composer ? composer.render() : renderer.render(scene, camera));
+  const render = (t = 0) => {
+    if (finishPass) finishPass.uniforms.uTime.value = t;
+    return composer ? composer.render() : renderer.render(scene, camera);
+  };
 
   let raf = 0;
   let last = 0;
@@ -165,7 +257,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     last = t;
     ctx.pointer.lerp(targetPointer, 0.06);
     for (const cb of frameCbs) cb(t, dt);
-    render();
+    render(t);
   };
 
   // First frame always renders (so reduced-motion users see the static world).

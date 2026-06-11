@@ -13,26 +13,31 @@ export type SceneName =
 
 type BloomOpts = NonNullable<CreateSceneOpts['bloom']>;
 
+// Per-scene bloom, retuned for the upgraded composer (default threshold is now
+// 0.5, and a vignette/grain/dither + SMAA chain runs after bloom). Goal: accents
+// glow but nothing washes to white, and no scene goes dim/flat. Emissive line &
+// particle scenes (network/signal/massspec/etc.) keep a LOWER threshold so their
+// additive geometry still crosses the bloom cutoff; solid/lit scenes sit higher.
 const BLOOM: Record<SceneName, BloomOpts> = {
-  network: { strength: 0.85, radius: 0.6, threshold: 0.05 },
-  molecule: { strength: 0.55, radius: 0.5, threshold: 0.12 },
-  protein: { strength: 0.7, radius: 0.5, threshold: 0.1 },
-  density: { strength: 1.0, radius: 0.7, threshold: 0.0 },
-  landscape: { strength: 0.8, radius: 0.6, threshold: 0.04 },
-  neuralnet: { strength: 0.85, radius: 0.6, threshold: 0.03 },
-  signal: { strength: 0.9, radius: 0.6, threshold: 0.02 },
-  orbital: { strength: 0.55, radius: 0.5, threshold: 0.08 },
-  helix: { strength: 0.6, radius: 0.5, threshold: 0.07 },
-  statmech: { strength: 0.7, radius: 0.55, threshold: 0.04 },
-  lattice: { strength: 0.6, radius: 0.5, threshold: 0.07 },
-  threebody: { strength: 0.7, radius: 0.6, threshold: 0.05 },
+  network: { strength: 0.6, radius: 0.55, threshold: 0.32 },
+  molecule: { strength: 0.5, radius: 0.5, threshold: 0.45 },
+  protein: { strength: 0.55, radius: 0.5, threshold: 0.42 },
+  density: { strength: 0.7, radius: 0.65, threshold: 0.25 },
+  landscape: { strength: 0.6, radius: 0.55, threshold: 0.3 },
+  neuralnet: { strength: 0.62, radius: 0.55, threshold: 0.3 },
+  signal: { strength: 0.7, radius: 0.55, threshold: 0.28 },
+  orbital: { strength: 0.5, radius: 0.5, threshold: 0.4 },
+  helix: { strength: 0.52, radius: 0.5, threshold: 0.4 },
+  statmech: { strength: 0.58, radius: 0.55, threshold: 0.35 },
+  lattice: { strength: 0.52, radius: 0.5, threshold: 0.4 },
+  threebody: { strength: 0.6, radius: 0.55, threshold: 0.33 },
   rubiks: { strength: 0.15, radius: 0.4, threshold: 0.6 },
-  routegraph: { strength: 0.85, radius: 0.6, threshold: 0.04 },
-  chromatography: { strength: 0.5, radius: 0.55, threshold: 0.15 },
-  massspec: { strength: 0.9, radius: 0.6, threshold: 0.02 },
-  gradientdescent: { strength: 0.45, radius: 0.5, threshold: 0.18 },
-  fourier: { strength: 0.85, radius: 0.6, threshold: 0.03 },
-  piano: { strength: 0.5, radius: 0.5, threshold: 0.15 },
+  routegraph: { strength: 0.62, radius: 0.55, threshold: 0.3 },
+  chromatography: { strength: 0.45, radius: 0.5, threshold: 0.4 },
+  massspec: { strength: 0.7, radius: 0.55, threshold: 0.28 },
+  gradientdescent: { strength: 0.42, radius: 0.5, threshold: 0.42 },
+  fourier: { strength: 0.62, radius: 0.55, threshold: 0.3 },
+  piano: { strength: 0.45, radius: 0.5, threshold: 0.4 },
 };
 
 export async function mountScene(
