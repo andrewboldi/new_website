@@ -13,7 +13,22 @@
 import * as THREE from 'three';
 import { PALETTE } from './core';
 
-export type ShapeGen = (pos: Float32Array, col: Float32Array, N: number, R: number) => void;
+/**
+ * A shape generator fills `pos` (N*3) and `col` (N*3). It MAY optionally fill an
+ * `aux` lane (N floats) with a per-point *render weight* in roughly [0.4, 2.2]:
+ * bright structural points (nuclei, backbones, atom cores) get large values,
+ * diffuse cloud points get small ones. ShapeScene reads this to drive sprite
+ * size + glow so the scenes get real chiaroscuro instead of a uniform fuzz.
+ * `aux` is optional and undefined in the morph field (which only needs pos+col),
+ * so every generator must remain correct when `aux` is not supplied.
+ */
+export type ShapeGen = (
+  pos: Float32Array,
+  col: Float32Array,
+  N: number,
+  R: number,
+  aux?: Float32Array,
+) => void;
 
 const C = {
   blue: new THREE.Color(PALETTE.blue),
@@ -21,11 +36,15 @@ const C = {
   violet: new THREE.Color(PALETTE.violet),
   amber: new THREE.Color(PALETTE.amber),
   white: new THREE.Color(0xdfeaff),
+  rose: new THREE.Color(0xff7eb6),   // base pair A–T
+  green: new THREE.Color(0x57e08a),  // base pair G–C
 };
 const set = (col: Float32Array, i: number, c: THREE.Color) => {
   col[i * 3] = c.r; col[i * 3 + 1] = c.g; col[i * 3 + 2] = c.b;
 };
 const rand = (a: number, b: number) => a + Math.random() * (b - a);
+/** standard-normal-ish sample (sum of uniforms), for soft gaussian clusters */
+const gauss = () => (Math.random() + Math.random() + Math.random() - 1.5) * 0.9;
 const tmp = new THREE.Color();
 
 /** Soft glowing sphere — latent chemical space. (Retained in the shape registry;
@@ -155,35 +174,85 @@ export const molecule: ShapeGen = (pos, col, N, R) => {
   }
 };
 
-/** DNA double helix — molecular biology. */
-export const helix: ShapeGen = (pos, col, N, R) => {
-  const turns = 3.2, rad = R * 0.42, H = R * 1.9;
-  const strand = (t: number, offset: number) => {
-    const y = (t - 0.5) * H;
-    const a = t * turns * Math.PI * 2 + offset;
-    return [Math.cos(a) * rad, y, Math.sin(a) * rad] as const;
+/**
+ * B-form DNA double helix — molecular biology. Two antiparallel sugar-phosphate
+ * backbones wind around a common axis; rigid base-pair RUNGS bridge them at the
+ * discrete ~10.5 bp/turn rise, colored by base pair (A–T rose, G–C green) with a
+ * cyan/amber junction where each base meets its strand. The two strands are
+ * offset by ~140° (not a flat 180°), which is what opens B-DNA's wide MAJOR and
+ * narrow MINOR grooves — so the silhouette reads as real DNA, not a double coil.
+ */
+export const helix: ShapeGen = (pos, col, N, R, aux) => {
+  const BP = 21;                       // base pairs shown
+  const RISE = R * 1.92 / BP;          // axial rise per base pair
+  const turns = BP / 10.5;             // B-DNA: ~10.5 bp per helical turn
+  const rad = R * 0.40;                // backbone helix radius
+  const H = RISE * (BP - 1);
+  const groove = (140 * Math.PI) / 180; // strand-2 angular offset → grooves
+  const W = 1.7;                       // base-pair half-shrink (bases sit inside)
+
+  // Backbone point on strand `k` (0|1) at fractional height t∈[0,1].
+  const back = (t: number, k: number) => {
+    const a = t * turns * Math.PI * 2 + (k ? groove : 0);
+    return [Math.cos(a) * rad, (t - 0.5) * H, Math.sin(a) * rad] as const;
   };
-  for (let i = 0; i < N; i++) {
-    const u = i / N;
-    if (u < 0.4) {
-      const t = (i / (0.4 * N));
-      const [x, y, z] = strand(t, 0);
-      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
-      set(col, i, C.cyan);
-    } else if (u < 0.8) {
-      const t = ((i - 0.4 * N) / (0.4 * N));
-      const [x, y, z] = strand(t, Math.PI);
-      pos[i * 3] = x; pos[i * 3 + 1] = y; pos[i * 3 + 2] = z;
-      set(col, i, C.blue);
-    } else {
-      const t = Math.random();
-      const s = Math.random();
-      const a = strand(t, 0), b = strand(t, Math.PI);
-      pos[i * 3] = a[0] + (b[0] - a[0]) * s;
-      pos[i * 3 + 1] = a[1] + (b[1] - a[1]) * s;
-      pos[i * 3 + 2] = a[2] + (b[2] - a[2]) * s;
-      set(col, i, C.amber);
+
+  // Budget: dense beaded backbones + bright phosphate beads, then base-pair rungs.
+  const bbStrand = Math.round(N * 0.26);       // points per backbone ribbon
+  const phos = Math.round(N * 0.10);           // bright phosphate beads (both strands)
+  const rungBudget = N - bbStrand * 2 - phos;  // base-pair rungs
+  let i = 0;
+
+  // --- two sugar-phosphate backbones (smooth beaded tubes) ---
+  for (let k = 0; k < 2; k++) {
+    const bcol = k ? C.blue : C.cyan;
+    for (let n = 0; n < bbStrand; n++, i++) {
+      const t = n / (bbStrand - 1);
+      const [x, y, z] = back(t, k);
+      const rr = rand(0, R * 0.05);            // tube thickness
+      const a = Math.random() * Math.PI * 2;
+      pos[i * 3] = x + Math.cos(a) * rr;
+      pos[i * 3 + 1] = y + gauss() * R * 0.012;
+      pos[i * 3 + 2] = z + Math.sin(a) * rr;
+      tmp.copy(bcol).lerp(C.white, Math.random() * 0.25);
+      set(col, i, tmp);
+      if (aux) aux[i] = 1.0 + Math.random() * 0.3;
     }
+  }
+
+  // --- bright phosphate beads pinned at each backbone residue (the "pearls") ---
+  for (let n = 0; n < phos; n++, i++) {
+    const k = n & 1;
+    const t = ((n >> 1) % BP) / (BP - 1);
+    const [x, y, z] = back(t, k);
+    pos[i * 3] = x + gauss() * R * 0.02;
+    pos[i * 3 + 1] = y + gauss() * R * 0.02;
+    pos[i * 3 + 2] = z + gauss() * R * 0.02;
+    tmp.copy(k ? C.blue : C.cyan).lerp(C.white, 0.5);
+    set(col, i, tmp);
+    if (aux) aux[i] = 1.9 + Math.random() * 0.4;
+  }
+
+  // --- base-pair rungs: a straight ladder rung between the two backbones ---
+  for (let r = 0; r < rungBudget; r++, i++) {
+    const bp = r % BP;                         // which base pair
+    const t = bp / (BP - 1);
+    const a0 = back(t, 0), a1 = back(t, 1);
+    // bring the bases inward so the pair is shorter than the full diameter
+    const cx = (a0[0] + a1[0]) / 2, cz = (a0[2] + a1[2]) / 2;
+    const e0x = cx + (a0[0] - cx) / W, e0z = cz + (a0[2] - cz) / W;
+    const e1x = cx + (a1[0] - cx) / W, e1z = cz + (a1[2] - cz) / W;
+    const s = Math.random();                   // position along the rung
+    const isAT = (bp * 7 + 3) % 5 < 3;         // pseudo-random but stable A–T vs G–C
+    const baseCol = isAT ? C.rose : C.green;
+    // junction near the backbone tints toward that strand's color
+    const edge = Math.min(s, 1 - s) * 2;       // 0 at ends, 1 at center
+    tmp.copy(s < 0.5 ? C.cyan : C.blue).lerp(baseCol, 0.25 + 0.75 * edge);
+    pos[i * 3] = e0x + (e1x - e0x) * s + gauss() * R * 0.018;
+    pos[i * 3 + 1] = a0[1] + gauss() * R * 0.012;
+    pos[i * 3 + 2] = e0z + (e1z - e0z) * s + gauss() * R * 0.018;
+    set(col, i, tmp);
+    if (aux) aux[i] = 0.8 + edge * 0.5;        // brighter toward the H-bonded center
   }
 };
 
@@ -223,18 +292,94 @@ export const benzene: ShapeGen = (pos, col, N, R) => {
   }
 };
 
-/** d_z² atomic orbital with phase coloring — quantum / physical chemistry. */
-export const orbital: ShapeGen = (pos, col, N, R) => {
-  for (let i = 0; i < N; i++) {
-    const theta = Math.acos(2 * Math.random() - 1);
-    const phi = Math.random() * Math.PI * 2;
-    const ang = 3 * Math.cos(theta) ** 2 - 1; // d_z² angular part (signed)
-    const mag = Math.abs(ang);
-    const r = R * 0.82 * (0.35 + 0.65 * Math.cbrt(Math.random())) * (0.25 + mag);
-    pos[i * 3] = r * Math.sin(theta) * Math.cos(phi);
-    pos[i * 3 + 1] = r * Math.cos(theta);
-    pos[i * 3 + 2] = r * Math.sin(theta) * Math.sin(phi);
-    set(col, i, ang >= 0 ? C.cyan : C.violet); // wavefunction phase
+/**
+ * 3d_z² atomic orbital — quantum / physical chemistry. The real thing: two large
+ * axial lobes along ±y (the "dumbbell") of POSITIVE wavefunction phase, wrapped
+ * by an equatorial TORUS of NEGATIVE phase, separated by the two nodal cones at
+ * the magic angle θ≈54.7°. Point density follows |ψ|² (rejection-sampled radial
+ * shell × angular weight) so it bunches in the high-probability lobe/ring caps
+ * and thins through the nodes — reading as a real orbital, not a fuzzy ball.
+ * A bright nucleus marker sits at the origin, and faint points trace the nodal
+ * cones so the geometry is legible. Two-tone phase coloring: cyan (+) / violet (−).
+ */
+export const orbital: ShapeGen = (pos, col, N, R, aux) => {
+  // d_z² angular function Y ∝ (3cos²θ − 1); |Y| peaks on-axis (lobes) and in-plane (torus).
+  const Y = (ct: number) => 3 * ct * ct - 1;
+  const NODE = Math.acos(1 / Math.sqrt(3));    // ≈ 0.9553 rad, the nodal cone angle
+
+  const nucleus = Math.round(N * 0.05);        // dense glowing core marker
+  const nodeRing = Math.round(N * 0.06);       // faint tracers on the two nodal cones
+  let i = 0;
+
+  // --- nucleus: a tight bright cluster at the origin ---
+  for (let n = 0; n < nucleus; n++, i++) {
+    const r = R * 0.07 * Math.cbrt(Math.random());
+    const th = Math.acos(2 * Math.random() - 1), ph = Math.random() * Math.PI * 2;
+    pos[i * 3] = r * Math.sin(th) * Math.cos(ph);
+    pos[i * 3 + 1] = r * Math.cos(th);
+    pos[i * 3 + 2] = r * Math.sin(th) * Math.sin(ph);
+    tmp.copy(C.white).lerp(C.amber, 0.35 * Math.random());
+    set(col, i, tmp);
+    if (aux) aux[i] = 2.1 + Math.random() * 0.3;
+  }
+
+  // --- the orbital cloud: |ψ|²-weighted rejection sampling ---
+  // radial part of 3d: ρ²·e^(−ρ/3) shape; we use a peaked shell ~0.45R with falloff.
+  const RMAX = R * 0.95;
+  let placed = i;
+  const cloud = N - nodeRing;
+  let guard = 0;
+  while (placed < cloud && guard < cloud * 60) {
+    guard++;
+    const ct = 2 * Math.random() - 1;          // cosθ uniform on sphere
+    const th = Math.acos(ct);
+    const ph = Math.random() * Math.PI * 2;
+    const yv = Y(ct);
+    const ang2 = (yv * yv) / 4;                // angular |Y|² weight, ~[0,1]
+    // radial: sample r, weight by a peaked 3d-like radial probability
+    const rho = Math.random() * 3;             // ρ in units where peak ~ 2
+    const radW = (rho * rho) * Math.exp(-rho * 0.9);
+    const w = ang2 * radW;
+    if (Math.random() > w * 1.15) continue;    // reject low-probability points
+    const r = (rho / 3) * RMAX * (0.85 + 0.15 * Math.random());
+    const st = Math.sin(th);
+    pos[placed * 3] = r * st * Math.cos(ph);
+    pos[placed * 3 + 1] = r * ct;
+    pos[placed * 3 + 2] = r * st * Math.sin(ph);
+    // phase coloring: + lobes cyan, − torus violet; brighten the dense caps
+    const positive = yv >= 0;
+    const base = positive ? C.cyan : C.violet;
+    tmp.copy(base).lerp(C.white, 0.18 * Math.min(1, w * 2));
+    set(col, placed, tmp);
+    if (aux) aux[placed] = 0.7 + Math.min(1.1, w * 1.4);
+    placed++;
+  }
+  // fill any rejection-sampling shortfall on the dominant +y lobe so N is exact
+  for (i = placed; i < cloud; i++) {
+    const r = RMAX * (0.4 + 0.5 * Math.random());
+    const th = rand(0, 0.5), ph = Math.random() * Math.PI * 2;
+    const sgn = Math.random() < 0.5 ? 1 : -1;
+    const st = Math.sin(th);
+    pos[i * 3] = r * st * Math.cos(ph);
+    pos[i * 3 + 1] = sgn * r * Math.cos(th);
+    pos[i * 3 + 2] = r * st * Math.sin(ph);
+    set(col, i, C.cyan);
+    if (aux) aux[i] = 0.8;
+  }
+
+  // --- nodal cones: faint dim tracers at θ = NODE and π−NODE (the sign change) ---
+  for (let n = 0; n < nodeRing; n++, i++) {
+    const sgn = n & 1 ? 1 : -1;
+    const th = sgn > 0 ? NODE : Math.PI - NODE;
+    const ph = Math.random() * Math.PI * 2;
+    const r = RMAX * (0.2 + 0.7 * Math.random());
+    const st = Math.sin(th);
+    pos[i * 3] = r * st * Math.cos(ph);
+    pos[i * 3 + 1] = r * Math.cos(th);
+    pos[i * 3 + 2] = r * st * Math.sin(ph);
+    tmp.copy(C.white).lerp(C.blue, 0.6);
+    set(col, i, tmp);
+    if (aux) aux[i] = 0.5;                      // faint, thin — just a hint of the node
   }
 };
 
@@ -297,20 +442,71 @@ export const neural: ShapeGen = (pos, col, N, R) => {
   }
 };
 
-/** Crystalline lattice — solid state / condensed matter. */
-export const lattice: ShapeGen = (pos, col, N, R) => {
-  const G = Math.max(3, Math.round(Math.cbrt(N / 1.6)));
+/**
+ * Rock-salt (NaCl) crystal — solid state / condensed matter. A clear 3×3×3 grid
+ * of lattice sites forming two interpenetrating FCC sublattices: alternating
+ * cations (small, warm amber) and anions (large, cool cyan) by the parity of
+ * (ix+iy+iz), the textbook NaCl checkerboard. Nearest neighbors are joined by
+ * BONDS running along the x/y/z axes (octahedral coordination) rendered as point
+ * lines, so the repeating cubic UNIT CELL is unmistakable. Each atom is a soft
+ * gaussian ball (denser core) and carries a small thermal-displacement jitter so
+ * it reads as a warm crystal rather than a cold dot grid. Reads as a crystal.
+ */
+export const lattice: ShapeGen = (pos, col, N, R, aux) => {
+  const G = 3;                                  // 3×3×3 sites → clean unit cell
   const span = R * 1.5;
-  let idx = 0;
-  for (let i = 0; i < N; i++) {
-    const ix = idx % G, iy = Math.floor(idx / G) % G, iz = Math.floor(idx / (G * G)) % G;
-    idx++;
-    const jitter = R * 0.02;
-    pos[i * 3] = (ix / (G - 1) - 0.5) * span + rand(-jitter, jitter);
-    pos[i * 3 + 1] = (iy / (G - 1) - 0.5) * span + rand(-jitter, jitter);
-    pos[i * 3 + 2] = (iz / (G - 1) - 0.5) * span + rand(-jitter, jitter);
-    tmp.copy(C.blue).lerp(C.cyan, ((ix + iy + iz) % 2) ? 0.7 : 0.1);
+  const step = span / (G - 1);
+  const site = (g: number) => (g / (G - 1) - 0.5) * span;
+
+  // collect sites and the axis-aligned nearest-neighbour bonds once
+  type Site = { x: number; y: number; z: number; cation: boolean };
+  const sites: Site[] = [];
+  const bonds: [number, number][] = [];
+  const idx = (ix: number, iy: number, iz: number) => (ix * G + iy) * G + iz;
+  for (let ix = 0; ix < G; ix++)
+    for (let iy = 0; iy < G; iy++)
+      for (let iz = 0; iz < G; iz++) {
+        sites.push({ x: site(ix), y: site(iy), z: site(iz), cation: ((ix + iy + iz) & 1) === 0 });
+        if (ix + 1 < G) bonds.push([idx(ix, iy, iz), idx(ix + 1, iy, iz)]);
+        if (iy + 1 < G) bonds.push([idx(ix, iy, iz), idx(ix, iy + 1, iz)]);
+        if (iz + 1 < G) bonds.push([idx(ix, iy, iz), idx(ix, iy, iz + 1)]);
+      }
+  const S = sites.length;       // 27
+  const B = bonds.length;       // 54
+
+  // Budget: ~62% to atom balls, ~38% to bonds, so both the sites and the cubic
+  // bond cage are clearly legible.
+  const atomBudget = Math.round(N * 0.62);
+  const cationR = R * 0.07, anionR = R * 0.12;  // anion (Cl⁻) larger than cation (Na⁺)
+  let i = 0;
+  for (let n = 0; n < atomBudget; n++, i++) {
+    const s = sites[n % S];
+    const rad = s.cation ? cationR : anionR;
+    const r = rad * Math.cbrt(Math.random()) * (0.6 + 0.4 * Math.random());
+    const th = Math.acos(2 * Math.random() - 1), ph = Math.random() * Math.PI * 2;
+    const thermal = R * 0.012;                  // small thermal smear
+    pos[i * 3] = s.x + r * Math.sin(th) * Math.cos(ph) + gauss() * thermal;
+    pos[i * 3 + 1] = s.y + r * Math.cos(th) + gauss() * thermal;
+    pos[i * 3 + 2] = s.z + r * Math.sin(th) * Math.sin(ph) + gauss() * thermal;
+    const baseCol = s.cation ? C.amber : C.cyan;
+    tmp.copy(C.white).lerp(baseCol, Math.min(1, r / rad + 0.2));
     set(col, i, tmp);
+    if (aux) aux[i] = (s.cation ? 1.3 : 1.6) + Math.random() * 0.3;
+  }
+
+  // bonds: thin point lines between nearest neighbours, tinted between the two ions
+  const bondBudget = N - i;
+  for (let b = 0; b < bondBudget; b++, i++) {
+    const [ia, ib] = bonds[b % B];
+    const a = sites[ia], c = sites[ib];
+    const s = Math.random();
+    const j = R * 0.012;
+    pos[i * 3] = a.x + (c.x - a.x) * s + gauss() * j;
+    pos[i * 3 + 1] = a.y + (c.y - a.y) * s + gauss() * j;
+    pos[i * 3 + 2] = a.z + (c.z - a.z) * s + gauss() * j;
+    tmp.copy(C.amber).lerp(C.cyan, s).lerp(C.blue, 0.3);
+    set(col, i, tmp);
+    if (aux) aux[i] = 0.6 + Math.random() * 0.2; // dim, thin struts
   }
 };
 
