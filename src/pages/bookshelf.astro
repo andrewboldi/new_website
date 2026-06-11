@@ -270,18 +270,37 @@ const payload = { books: shelfData, writings: writingData };
     window.dispatchEvent(new CustomEvent('book:set', { detail: -1 })); // re-roll the 3D scroll
   };
 
+  // The reader opens EVENT-DRIVEN: Library3D fires `library:scroll-ready` at the
+  // exact frame the 3D scroll's take-out + unroll finishes, so the HTML parchment
+  // begins its own unroll cleanly AFTER the 3D scroll has fully presented — one
+  // continuous, uninterrupted sequence (never a mid-animation pop). `library:open`
+  // only records the pending scroll + arms a safety fallback (and handles close).
+  let pendingRef = -1;
+  const READY_FALLBACK_MS = reduce ? 0 : 5200; // > the 3D scroll's ~4.6s open dur
+
+  const openPending = () => {
+    if (pendingRef < 0) return;
+    const ref = pendingRef;
+    pendingRef = -1;
+    clearTimeout(openTimer);
+    showReader(ref);
+  };
+
   window.addEventListener('library:open', (e) => {
     const { kind, ref } = (e as CustomEvent).detail || {};
     if (kind === 'scroll' && ref >= 0) {
-      // Bring the parchment up just as the 3D scroll has lifted + centered, then
-      // let the HTML scroll itself unroll — so it reads as one continuous object.
-      // The darkening backdrop swallows the 3D scroll as the parchment takes over.
+      pendingRef = ref;
+      // Safety net only: if the 3D completion event never arrives, still open.
       clearTimeout(openTimer);
-      openTimer = window.setTimeout(() => showReader(ref), reduce ? 0 : 480);
+      openTimer = window.setTimeout(openPending, READY_FALLBACK_MS);
     } else if (kind !== 'scroll') {
+      pendingRef = -1;
+      clearTimeout(openTimer);
       hideReader();
     }
   });
+  // Normal path: open precisely when the 3D scroll animation has fully completed.
+  window.addEventListener('library:scroll-ready', () => openPending());
   document.querySelectorAll('[data-reader-close]').forEach((b) => b.addEventListener('click', hideReader));
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && isOpen) hideReader(); });
 </script>

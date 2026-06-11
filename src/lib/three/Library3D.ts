@@ -722,6 +722,10 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   let hovered = -1, selected = -1;
   const hitMeshes = items.map((it) => it.group);
   const anim = new Float32Array(items.length);
+  // Tracks whether we've already announced the current selection's open
+  // animation as finished, so `library:scroll-ready` fires exactly once per open
+  // (at the frame its progress first reaches 1), not every frame after.
+  let readyFired = false;
 
   const onMove = (e: PointerEvent) => {
     const r = renderer.domElement.getBoundingClientRect();
@@ -729,6 +733,7 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   };
   const setSel = (i: number) => {
     selected = i;
+    readyFired = false; // arm the completion signal for this new selection
     const it = i >= 0 ? items[i] : null;
     window.dispatchEvent(new CustomEvent('library:open', { detail: it ? { kind: it.kind, ref: it.ref } : { kind: null, ref: -1 } }));
   };
@@ -754,8 +759,17 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     const d = Math.min(dt, 0.05);
     for (const it of items) {
       const dir = it.index === selected ? 1 : -1;
-      anim[it.index] = Math.min(1, Math.max(0, anim[it.index] + (dir * d) / it.dur));
+      const prev = anim[it.index];
+      anim[it.index] = Math.min(1, Math.max(0, prev + (dir * d) / it.dur));
       it.apply(anim[it.index], it.index === hovered && !open && anim[it.index] < 0.02);
+      // Announce the exact frame a selected scroll's take-out + unroll finishes
+      // (progress crosses to 1). The HTML reader modal listens for this so it
+      // only unrolls AFTER the 3D scroll has fully presented — one continuous,
+      // uninterrupted sequence rather than a mid-animation pop. Fires once.
+      if (!readyFired && it.index === selected && it.kind === 'scroll' && prev < 1 && anim[it.index] >= 1) {
+        readyFired = true;
+        window.dispatchEvent(new CustomEvent('library:scroll-ready', { detail: { kind: it.kind, ref: it.ref } }));
+      }
     }
 
     // dust motes drift down through the lamp light and wrap — imperceptibly
