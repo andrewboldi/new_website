@@ -1,7 +1,12 @@
 /**
  * MoleculeViewer — loads a real molecule from a PDB file and renders it as a
- * glowing ball-and-stick model that the visitor can spin. Organic chemistry,
- * made tangible.
+ * premium, glowing BALL-AND-STICK model the visitor can spin.
+ *
+ * Detail: specular env-lit CPK-colored atom spheres (instanced) with a subtle
+ * rim light and a faint per-atom electron-cloud halo; bonds as shaded cylinders
+ * (instanced), with DOUBLE bonds drawn as twin parallel rods where the geometry
+ * implies them; a gentle breathing + auto-rotate; soft bloom. The PDB-loading
+ * interface is unchanged.
  */
 import * as THREE from 'three';
 import { PDBLoader } from 'three/examples/jsm/loaders/PDBLoader.js';
@@ -20,35 +25,88 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
   const { ctx, onFrame, onDispose } = handle;
   const { scene, camera, renderer } = ctx;
 
+  const reduced =
+    typeof matchMedia !== 'undefined' &&
+    matchMedia('(prefers-reduced-motion: reduce)').matches;
+
   camera.position.set(0, 0, 26);
 
-  scene.add(new THREE.AmbientLight(0x99bbff, 0.7));
-  const key = new THREE.DirectionalLight(0xffffff, 2.2);
+  // env so the spheres get real specular reflections — a cheap gradient
+  // CanvasTexture (no heavy PMREM prefilter, which can stall software-GL).
+  const envCanvas = document.createElement('canvas');
+  envCanvas.width = 4; envCanvas.height = 64;
+  const ectx = envCanvas.getContext('2d')!;
+  const grad = ectx.createLinearGradient(0, 0, 0, 64);
+  grad.addColorStop(0.0, '#0a1426');
+  grad.addColorStop(0.4, '#16314a');
+  grad.addColorStop(0.6, '#3a6488');
+  grad.addColorStop(0.78, '#bcd6ee');
+  grad.addColorStop(1.0, '#0a1426');
+  ectx.fillStyle = grad; ectx.fillRect(0, 0, 4, 64);
+  const env = new THREE.CanvasTexture(envCanvas);
+  env.mapping = THREE.EquirectangularReflectionMapping;
+  env.colorSpace = THREE.SRGBColorSpace;
+  scene.environment = env;
+
+  scene.add(new THREE.AmbientLight(0x99bbff, 0.55));
+  const key = new THREE.DirectionalLight(0xffffff, 2.4);
   key.position.set(6, 8, 10);
   scene.add(key);
-  const rim = new THREE.PointLight(PALETTE.cyan, 60, 120);
-  rim.position.set(-8, -4, 6);
+  const rim = new THREE.PointLight(PALETTE.cyan, 90, 140, 2);
+  rim.position.set(-9, -4, 7);
   scene.add(rim);
-  const fill = new THREE.PointLight(PALETTE.blue, 40, 120);
-  fill.position.set(8, 2, -8);
+  const fill = new THREE.PointLight(PALETTE.blue, 55, 140, 2);
+  fill.position.set(9, 3, -9);
   scene.add(fill);
+  // a back rim to pop the silhouette
+  const back = new THREE.DirectionalLight(0xbfe0ff, 1.0);
+  back.position.set(-4, 2, -10);
+  scene.add(back);
 
   const controls = new OrbitControls(camera, renderer.domElement);
   controls.enableZoom = false;
   controls.enablePan = false;
   controls.enableDamping = true;
   controls.dampingFactor = 0.08;
-  controls.autoRotate = true;
-  controls.autoRotateSpeed = opts.autoRotate ?? 1.6;
+  controls.autoRotate = !reduced;
+  controls.autoRotateSpeed = opts.autoRotate ?? 1.4;
   controls.rotateSpeed = 0.6;
 
   const root = new THREE.Group();
   scene.add(root);
+  // a separate group for halos so we can pulse them independently
+  const haloGroup = new THREE.Group();
+  root.add(haloGroup);
 
-  const sphereGeo = new THREE.IcosahedronGeometry(1, 3);
-  const bondGeo = new THREE.CylinderGeometry(0.12, 0.12, 1, 12, 1, true);
+  const sphereGeo = new THREE.IcosahedronGeometry(1, 4);
+  const bondGeo = new THREE.CylinderGeometry(1, 1, 1, 16, 1, true);
+  const haloGeo = new THREE.IcosahedronGeometry(1, 2);
   const S = opts.scale ?? 3.2;
   const up = new THREE.Vector3(0, 1, 0);
+
+  const disposables: Array<{ dispose: () => void }> = [sphereGeo, bondGeo, haloGeo];
+
+  // halo shader: soft fresnel shell that reads as an electron cloud
+  const haloMat = new THREE.ShaderMaterial({
+    uniforms: { uColor: { value: new THREE.Color(PALETTE.cyan) }, uPulse: { value: 1 } },
+    transparent: true, depthWrite: false, blending: THREE.AdditiveBlending,
+    side: THREE.BackSide,
+    vertexShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vView;
+      void main() {
+        vN = normalize(normalMatrix * normal);
+        vec4 mv = modelViewMatrix * vec4(position, 1.0);
+        vView = normalize(-mv.xyz);
+        gl_Position = projectionMatrix * mv;
+      }`,
+    fragmentShader: /* glsl */ `
+      varying vec3 vN; varying vec3 vView; uniform vec3 uColor; uniform float uPulse;
+      void main() {
+        float f = pow(1.0 - max(0.0, dot(normalize(vN), normalize(vView))), 2.4);
+        gl_FragColor = vec4(uColor, f * 0.5 * uPulse);
+      }`,
+  });
+  disposables.push(haloMat);
 
   const loader = new PDBLoader();
   loader.load(
@@ -65,48 +123,122 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
 
       const posA = geoAtoms.getAttribute('position');
       const colA = geoAtoms.getAttribute('color');
+      const nAtoms = posA.count;
+
+      // ---- store atom data (positions in scaled local space + element radius) ----
+      const atomPos: THREE.Vector3[] = [];
+      const atomRadius = new Float32Array(nAtoms);
       const p = new THREE.Vector3();
       const c = new THREE.Color();
+      const m4 = new THREE.Matrix4();
 
-      for (let i = 0; i < posA.count; i++) {
+      // CPK-ish van-der-Waals scaling (relative)
+      const radiusFor = (el: string) =>
+        el === 'H' ? 0.32 : el === 'C' ? 0.62 : el === 'N' ? 0.58 :
+        el === 'O' ? 0.56 : el === 'S' ? 0.78 : el === 'P' ? 0.8 : 0.6;
+
+      // ---- instanced atoms ----
+      const atomMat = new THREE.MeshPhysicalMaterial({
+        vertexColors: false, color: 0xffffff, roughness: 0.28, metalness: 0.0,
+        clearcoat: 0.6, clearcoatRoughness: 0.25, envMapIntensity: 1.3,
+        emissiveIntensity: 0.0,
+      });
+      disposables.push(atomMat);
+      const atoms = new THREE.InstancedMesh(sphereGeo, atomMat, nAtoms);
+      atoms.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(nAtoms * 3), 3);
+
+      // halos (instanced, slightly larger than atoms)
+      const halos = new THREE.InstancedMesh(haloGeo, haloMat, nAtoms);
+
+      for (let i = 0; i < nAtoms; i++) {
         p.fromBufferAttribute(posA, i).add(offset).multiplyScalar(S);
         c.fromBufferAttribute(colA, i);
-        const element = json.atoms[i]?.[4] ?? 'C';
-        const radius = element === 'H' ? 0.34 : 0.62;
-        const mat = new THREE.MeshStandardMaterial({
-          color: c,
-          roughness: 0.35,
-          metalness: 0.1,
-          emissive: c.clone().multiplyScalar(0.18),
-        });
-        const atom = new THREE.Mesh(sphereGeo, mat);
-        atom.position.copy(p);
-        atom.scale.setScalar(radius);
-        root.add(atom);
-      }
+        const el = (json.atoms[i]?.[4] as string) ?? 'C';
+        const radius = radiusFor(el);
+        atomPos.push(p.clone());
+        atomRadius[i] = radius;
 
-      // bonds: pairs of positions
+        m4.makeScale(radius, radius, radius);
+        m4.setPosition(p);
+        atoms.setMatrixAt(i, m4);
+        atoms.setColorAt(i, c);
+
+        m4.makeScale(radius * 1.85, radius * 1.85, radius * 1.85);
+        m4.setPosition(p);
+        halos.setMatrixAt(i, m4);
+      }
+      atoms.instanceMatrix.needsUpdate = true;
+      if (atoms.instanceColor) atoms.instanceColor.needsUpdate = true;
+      halos.instanceMatrix.needsUpdate = true;
+      root.add(atoms);
+      haloGroup.add(halos);
+
+      // ---- bonds (instanced cylinders) with DOUBLE-bond detection ----
       const posB = geoBonds.getAttribute('position');
+      const nBondsRaw = Math.floor(posB.count / 2);
       const start = new THREE.Vector3();
       const end = new THREE.Vector3();
-      const bondMat = new THREE.MeshStandardMaterial({
-        color: 0xcfdcff,
-        roughness: 0.5,
-        metalness: 0.2,
-        emissive: 0x0a1830,
-      });
+
+      // collect bond endpoints; detect short C–C / C–O / C–N pairs that PDBLoader
+      // may have emitted twice or that are short enough to render as doubles.
+      interface B { a: THREE.Vector3; b: THREE.Vector3; len: number; }
+      const rawBonds: B[] = [];
       for (let i = 0; i < posB.count; i += 2) {
         start.fromBufferAttribute(posB, i).add(offset).multiplyScalar(S);
         end.fromBufferAttribute(posB, i + 1).add(offset).multiplyScalar(S);
-        const bond = new THREE.Mesh(bondGeo, bondMat);
-        bond.position.copy(start).lerp(end, 0.5);
-        bond.scale.y = start.distanceTo(end);
-        bond.quaternion.setFromUnitVectors(
-          up,
-          end.clone().sub(start).normalize(),
-        );
-        root.add(bond);
+        rawBonds.push({ a: start.clone(), b: end.clone(), len: start.distanceTo(end) });
       }
+
+      // figure out which bonds to draw doubled: shorter-than-typical bonds get a
+      // twin offset rod. (Heuristic — PDB has no explicit order; this just adds
+      // visual richness consistent with the structure.)
+      const lens = rawBonds.map((x) => x.len).sort((a, b) => a - b);
+      const medLen = lens.length ? lens[Math.floor(lens.length / 2)] : 1;
+      const doubleThresh = medLen * 0.92;
+
+      // count total rods (singles=1, doubles=2)
+      let rodCount = 0;
+      for (const bd of rawBonds) rodCount += bd.len < doubleThresh ? 2 : 1;
+
+      const bondMat = new THREE.MeshPhysicalMaterial({
+        color: 0xcdd9f2, roughness: 0.45, metalness: 0.15,
+        clearcoat: 0.4, clearcoatRoughness: 0.3, envMapIntensity: 1.0,
+        emissive: 0x0a1626, emissiveIntensity: 0.5,
+      });
+      disposables.push(bondMat);
+      const bonds = new THREE.InstancedMesh(bondGeo, bondMat, rodCount);
+
+      const dir = new THREE.Vector3();
+      const mid = new THREE.Vector3();
+      const quat = new THREE.Quaternion();
+      const perp = new THREE.Vector3();
+      const scl = new THREE.Vector3();
+      let ri = 0;
+      const placeRod = (a: THREE.Vector3, b: THREE.Vector3, off: THREE.Vector3, rad: number) => {
+        dir.subVectors(b, a);
+        const len = dir.length();
+        mid.addVectors(a, b).multiplyScalar(0.5).add(off);
+        quat.setFromUnitVectors(up, dir.clone().normalize());
+        scl.set(rad, len, rad);
+        m4.compose(mid, quat, scl);
+        bonds.setMatrixAt(ri++, m4);
+      };
+      const ZERO = new THREE.Vector3();
+      for (const bd of rawBonds) {
+        if (bd.len < doubleThresh) {
+          // double: offset perpendicular to bond, in a stable plane
+          dir.subVectors(bd.b, bd.a).normalize();
+          perp.set(dir.y, -dir.x, 0);
+          if (perp.lengthSq() < 1e-4) perp.set(0, dir.z, -dir.y);
+          perp.normalize().multiplyScalar(0.13 * S * 0.3 + 0.11);
+          placeRod(bd.a, bd.b, perp, 0.075 * S * 0.45 + 0.05);
+          placeRod(bd.a, bd.b, perp.clone().negate(), 0.075 * S * 0.45 + 0.05);
+        } else {
+          placeRod(bd.a, bd.b, ZERO, 0.11 * S * 0.35 + 0.06);
+        }
+      }
+      bonds.instanceMatrix.needsUpdate = true;
+      root.add(bonds);
 
       // frame the molecule
       const r = new THREE.Box3().setFromObject(root).getSize(new THREE.Vector3()).length();
@@ -117,10 +249,18 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
     () => { /* swallow load errors gracefully */ },
   );
 
-  onFrame(() => controls.update());
+  onFrame((t) => {
+    controls.update();
+    if (!reduced) {
+      // gentle breathing of the whole molecule
+      root.scale.setScalar(1 + Math.sin(t * 0.9) * 0.018);
+      // halo pulse
+      (haloMat.uniforms.uPulse.value as number) = 0.8 + Math.sin(t * 1.3) * 0.25;
+    }
+  });
   onDispose(() => {
     controls.dispose();
-    sphereGeo.dispose();
-    bondGeo.dispose();
+    for (const d of disposables) { try { d.dispose(); } catch { /* noop */ } }
+    env.dispose();
   });
 }
