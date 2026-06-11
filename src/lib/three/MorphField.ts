@@ -26,10 +26,10 @@ const VS = /* glsl */ `
   void main() {
     vColor = aColor;
     vec3 p = position;
-    p.x += sin(uTime * 0.6 + position.y * 0.3) * 0.25;
-    p.y += cos(uTime * 0.5 + position.x * 0.3) * 0.25;
+    p.x += sin(uTime * 0.5 + position.y * 0.3) * 0.09;
+    p.y += cos(uTime * 0.45 + position.x * 0.3) * 0.09;
     vec4 mv = modelViewMatrix * vec4(p, 1.0);
-    gl_PointSize = aScale * (300.0 / -mv.z);
+    gl_PointSize = aScale * (215.0 / -mv.z);
     gl_Position = projectionMatrix * mv;
   }`;
 
@@ -39,8 +39,9 @@ const FS = /* glsl */ `
     vec2 uv = gl_PointCoord - 0.5;
     float d = length(uv);
     if (d > 0.5) discard;
+    // sharper dot: small bright core, tight falloff (legible, less haze)
     float core = smoothstep(0.5, 0.0, d);
-    gl_FragColor = vec4(mix(vColor, vec3(1.0), core * 0.4), smoothstep(0.5, 0.12, d));
+    gl_FragColor = vec4(mix(vColor, vec3(1.0), core * 0.18), smoothstep(0.5, 0.22, d) * 0.9);
   }`;
 
 interface Opts {
@@ -55,7 +56,7 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
 
   const stages = opts.stages ?? DEFAULT_STAGES;
   const mobile = ctx.width < 760;
-  const N = opts.count ?? (mobile ? 2600 : 5200);
+  const N = opts.count ?? (mobile ? 1800 : 3200);
   const R = 22;
 
   camera.position.set(0, 0, 50);
@@ -100,6 +101,7 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
 
   let progress = 0;       // eased scroll progress 0..1
   let lastStage = -1;
+  let lastI = -1, lastBlend = -1; // skip the morph loop when nothing changed
 
   const scrollProgress = () => {
     // window.scrollY is robust even when `body { overflow-x: hidden }` makes the
@@ -111,26 +113,32 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   onFrame((t, dt) => {
     mat.uniforms.uTime.value = t;
 
-    // ease toward the real scroll position
-    progress += (scrollProgress() - progress) * Math.min(1, dt * 3.2);
+    // ease toward the real scroll position (tight enough to track, smooth enough to glide)
+    progress += (scrollProgress() - progress) * Math.min(1, dt * 5);
 
     const span = stages.length - 1;
     const sf = progress * span;
     const i = Math.min(span - 1, Math.floor(sf));
-    const blend = smoothstep(0, 1, sf - i);
+    // hold each shape for most of its scroll range, morph quickly in the middle
+    const blend = smoothstep(0.32, 0.68, sf - i);
 
-    const a = targets[i], b = targets[i + 1];
-    for (let k = 0; k < N; k++) {
-      const k3 = k * 3;
-      positions[k3] = a.p[k3] + (b.p[k3] - a.p[k3]) * blend;
-      positions[k3 + 1] = a.p[k3 + 1] + (b.p[k3 + 1] - a.p[k3 + 1]) * blend;
-      positions[k3 + 2] = a.p[k3 + 2] + (b.p[k3 + 2] - a.p[k3 + 2]) * blend;
-      colors[k3] = a.c[k3] + (b.c[k3] - a.c[k3]) * blend;
-      colors[k3 + 1] = a.c[k3 + 1] + (b.c[k3 + 1] - a.c[k3 + 1]) * blend;
-      colors[k3 + 2] = a.c[k3 + 2] + (b.c[k3 + 2] - a.c[k3 + 2]) * blend;
+    // only rewrite the buffers when the shape state actually moved (the drift in
+    // the vertex shader keeps it alive while idle) — this is the scroll-cost win
+    if (i !== lastI || Math.abs(blend - lastBlend) > 0.0015) {
+      lastI = i; lastBlend = blend;
+      const a = targets[i], b = targets[i + 1];
+      for (let k = 0; k < N; k++) {
+        const k3 = k * 3;
+        positions[k3] = a.p[k3] + (b.p[k3] - a.p[k3]) * blend;
+        positions[k3 + 1] = a.p[k3 + 1] + (b.p[k3 + 1] - a.p[k3 + 1]) * blend;
+        positions[k3 + 2] = a.p[k3 + 2] + (b.p[k3 + 2] - a.p[k3 + 2]) * blend;
+        colors[k3] = a.c[k3] + (b.c[k3] - a.c[k3]) * blend;
+        colors[k3 + 1] = a.c[k3 + 1] + (b.c[k3 + 1] - a.c[k3 + 1]) * blend;
+        colors[k3 + 2] = a.c[k3 + 2] + (b.c[k3 + 2] - a.c[k3 + 2]) * blend;
+      }
+      geo.attributes.position.needsUpdate = true;
+      geo.attributes.aColor.needsUpdate = true;
     }
-    geo.attributes.position.needsUpdate = true;
-    geo.attributes.aColor.needsUpdate = true;
 
     // notify the page which field we're in
     const stageIdx = Math.round(sf);

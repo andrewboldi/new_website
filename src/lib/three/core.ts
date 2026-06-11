@@ -60,6 +60,8 @@ export interface CreateSceneOpts {
   clearColor?: number;
   /** render a single static frame even under reduced motion (default true) */
   staticFallback?: boolean;
+  /** cap the device pixel ratio (cheaper for large/background canvases) */
+  maxPixelRatio?: number;
 }
 
 /**
@@ -78,7 +80,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     alpha: opts.alpha ?? true,
     powerPreference: 'high-performance',
   });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(devicePixelRatio, opts.maxPixelRatio ?? 2));
   renderer.setSize(width, height);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
