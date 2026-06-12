@@ -39,7 +39,9 @@
     mount('#ambient-field', (h) => ambientField(h), {
       bloom: false,
       alpha: true,
-      maxPixelRatio: mobile ? 1.0 : 1.3,
+      // Capped low: the fBm is blurred + low-opacity behind everything, so extra
+      // resolution is invisible but costs fill on every frame it renders.
+      maxPixelRatio: mobile ? 1.0 : 1.1,
     });
 
     const tag = document.getElementById('field-tag');
@@ -56,7 +58,7 @@
             dot.style.boxShadow = `0 0 12px ${c}`;
           }
         },
-      }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.3 });
+      }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.15 });
   };
   document.addEventListener('astro:page-load', mountFields);
 </script>

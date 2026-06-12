@@ -56,7 +56,11 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
 
   const stages = opts.stages ?? DEFAULT_STAGES;
   const mobile = ctx.width < 760;
-  const N = opts.count ?? (mobile ? 1800 : 3200);
+  // Particle budget trimmed (was 3200 desktop / 1800 mobile). The field is a
+  // soft background behind page content — every shape still reads clearly at this
+  // density, and the per-frame O(N) diffusion-displacement loop + bond-web rebuild
+  // get ~45% cheaper, smoothing scroll on content pages (perf budget: POLA-fast).
+  const N = opts.count ?? (mobile ? 1100 : 1800);
   const R = 22;
 
   camera.position.set(0, 0, 50);

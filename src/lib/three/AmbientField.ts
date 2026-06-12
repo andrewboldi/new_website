@@ -77,12 +77,13 @@ const FS = /* glsl */ `
 
     float t = uTime * 0.018 * uMotion;       // very slow drift
 
-    // domain warp: fbm of (p + fbm(p + t)) — flowing, "living" marble
+    // domain warp: fbm of (p + fbm(p + t)) — flowing, "living" marble.
+    // Single warp layer (was two nested layers = 5 fbm taps/pixel; now 3). The
+    // field is blurred + low-opacity behind everything, so the second warp added
+    // ~40% shader cost for detail the blur erased. q is reused as the warp source.
     vec2 q = vec2(fbm(p + vec2(0.0, t)),
                   fbm(p + vec2(5.2, 1.3 - t)));
-    vec2 r = vec2(fbm(p + 1.8 * q + vec2(1.7, 9.2) + 0.10 * t),
-                  fbm(p + 1.8 * q + vec2(8.3, 2.8) - 0.12 * t));
-    float n = fbm(p + 2.0 * r);
+    float n = fbm(p + 1.9 * q + vec2(1.7, 9.2) + 0.10 * t);
 
     // gentle vertical falloff keeps the top (where headlines live) calmer
     float band = smoothstep(0.0, 1.0, uv.y * 0.6 + 0.25);

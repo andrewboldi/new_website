@@ -235,15 +235,24 @@ export function heroField(handle: SceneHandle) {
   // CPU fallback path so we can verify it renders without real float targets.
   const forceCPU = typeof window !== 'undefined' && (window as any).__HERO_FORCE_CPU__ === true;
 
-  // Texture size: 512² (~262k) desktop, 256² (~65k) weaker GPUs / mobile.
+  // Texture size: 256² (~65k) desktop, 160² (~25k) weaker GPUs / mobile.
+  // (Was 512²≈262k — far more than the denoise-into-caffeine needs to read; the
+  // ball-and-stick is fully legible at 65k and per-frame fill/vertex cost drops
+  // ~4×, which is the main scroll-smoothness win. Perf budget: POLA-fast.)
   const mobile = ctx.width < 760 ||
     (typeof navigator !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent));
-  const maxTex = (renderer.capabilities as any).maxTextureSize ?? 4096;
-  const WIDTH = (mobile || maxTex < 4096) ? 256 : 512;
+  const WIDTH = mobile ? 160 : 256;
   const COUNT = WIDTH * WIDTH;
 
   const cloudColor = new THREE.Color(PALETTE.cyan).lerp(new THREE.Color(PALETTE.blue), 0.35);
-  const dpr = Math.min(renderer.getPixelRatio(), 2);
+  // Cap the hero's pixel ratio LOW (≤1.25). index.astro mounts the hero at
+  // maxPixelRatio:2 on the 'feature' tier (bloom+finish+SMAA), so at DPR 2 the
+  // fullscreen additive fill + 4 post passes quadruple in cost for no visible
+  // gain on a soft glowing cloud. Set the renderer ratio directly here (it owns
+  // its canvas) and feed the same value to the point-size uniform.
+  const HERO_DPR_CAP = 1.25;
+  const dpr = Math.min(renderer.getPixelRatio(), HERO_DPR_CAP);
+  renderer.setPixelRatio(dpr);
   // Molecule fit: a touch larger than R so the ball-and-stick fills the frame.
   const molScale = (R * 1.15) / CAFFEINE_RADIUS;
 
@@ -341,11 +350,13 @@ export function heroField(handle: SceneHandle) {
   let targetTex: THREE.DataTexture | null = null;
   let targetColTex: THREE.DataTexture | null = null;
 
-  // point size: smaller when very dense (GPGPU 262k), larger for the sparse CPU cloud
-  const pointSize = usedGPGPU ? (WIDTH === 512 ? 1.6 : 2.4) : 2.8;
-  // global alpha: the denser the cloud, the lower per-point alpha must be so
-  // additive overlap doesn't saturate to white (esp. once formed onto the molecule).
-  const alphaScale = usedGPGPU ? (WIDTH === 512 ? 0.085 : 0.18) : 0.5;
+  // point size: bigger for the sparser 65k/25k clouds so coverage/luminance hold
+  // after the count cut (256²≈65k desktop, 160²≈25k mobile), larger still for CPU.
+  const pointSize = usedGPGPU ? (WIDTH >= 256 ? 2.2 : 2.8) : 2.8;
+  // global alpha: lower per-point alpha so additive overlap doesn't saturate to
+  // white (esp. once formed onto the thin molecule). Nudged up vs the old 512²
+  // value to compensate for the lower density at 256²/160².
+  const alphaScale = usedGPGPU ? (WIDTH >= 256 ? 0.14 : 0.22) : 0.5;
 
   let renderMat: THREE.ShaderMaterial;
   if (usedGPGPU && gpu) {
@@ -467,11 +478,16 @@ export function heroField(handle: SceneHandle) {
   //                    the render still samples the latest position texture
   //                    every frame — only the underlying swirl advances slower).
   // Sizes/alpha scale up a touch as the count thins so density + luminance hold.
-  const Q_FRAC: Record<number, number> = { 1: 1, 0.75: 0.6, 0.5: 0.34 };
-  const Q_STRIDE: Record<number, number> = { 1: 1, 0.75: 2, 0.5: 2 };
+  // ALWAYS throttle the GPGPU sim to ~30fps (stride 2) — the curl swirl is slow
+  // and organic, so a 30fps sim is visually indistinguishable from 60fps while
+  // halving the heaviest per-frame GPU cost (the curl-noise velocity pass). The
+  // render still samples the latest position texture EVERY frame, so the denoise
+  // and scroll stay buttery. Under GPU load we thin the drawn particle count too.
+  const Q_FRAC: Record<number, number> = { 1: 1, 0.75: 0.55, 0.5: 0.3 };
+  const Q_STRIDE: Record<number, number> = { 1: 2, 0.75: 2, 0.5: 3 };
   let targetFrac = 1;          // where we're easing TO (set by onQuality)
   let activeFrac = 1;          // current eased fraction
-  let computeStride = 1;       // 1 = every frame, 2 = ~30fps
+  let computeStride = 2;       // 2 = ~30fps sim (default), 3 = ~20fps under load
   let computeAccum = 0;        // frames since last compute (throttle counter)
 
   // Only the GPGPU path adapts the draw range (the CPU fallback is already a tiny
@@ -535,17 +551,18 @@ export function heroField(handle: SceneHandle) {
       renderMat.uniforms.uSize.value = pointSize * Math.min(comp, 1.7);
       renderMat.uniforms.uAlpha.value = alphaScale * Math.min(comp, 1.5);
 
-      // throttle the GPGPU sim to ~30fps when GPU-bound: skip compute on the
-      // off frames but accumulate their delta so the swirl speed is unchanged
-      // when it DOES step (no slow-motion). Render samples the latest texture
-      // every frame regardless → the eased denoise stays buttery-smooth.
+      // throttle the GPGPU sim: skip compute on off-frames but accumulate their
+      // delta so the swirl speed is unchanged when it DOES step (no slow-motion).
+      // Stride 2 → ~30fps sim (default), stride 3 → ~20fps (GPU-bound). Render
+      // samples the latest texture EVERY frame regardless → the eased denoise and
+      // scroll stay buttery-smooth even though the underlying sim advances slower.
+      const simInterval = computeStride >= 3 ? 1 / 20 : 1 / 30;
       computeAccum += delta;
-      const doCompute = computeStride <= 1 || (computeAccum >= (1 / 30));
+      const doCompute = computeAccum >= simInterval;
       if (doCompute) {
-        // Sim delta is still capped at 1/30 (the velocity shader's stable max) so
-        // a throttled step never blows up; `delta` itself is already ≤1/30, so at
-        // stride 1 this is identical to before.
-        const simDelta = Math.min(computeAccum, 1 / 30);
+        // Sim delta capped at simInterval (velocity shader's stable max with its
+        // damping + speed clamp) so a throttled step never blows up after a stall.
+        const simDelta = Math.min(computeAccum, simInterval);
         velocityVariable.material.uniforms.uTime.value = t;
         velocityVariable.material.uniforms.uDelta.value = simDelta;
         positionVariable.material.uniforms.uDelta.value = simDelta;
