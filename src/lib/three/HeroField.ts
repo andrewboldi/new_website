@@ -25,6 +25,21 @@
  * zero compute. Fallback: if WebGL2 float render targets are unavailable (or the
  * swiftshader test renderer can't run GPGPU), a CPU Points morph renders instead
  * so the hero NEVER breaks.
+ *
+ * ADAPTIVE COST (handle.onQuality, §Performance budget): the hero always renders
+ * at full rate, so its GPGPU compute + 262k-point draw is a steady GPU load. When
+ * the global governor reports the page is GPU-bound (q drops 1 → 0.75 → 0.5), the
+ * hero scales ITSELF down without hurting the look on capable machines:
+ *   - active particle count eases down via a SHUFFLED draw range (the refs are
+ *     permuted once so dropping the tail removes a spatially-uniform subset of
+ *     BOTH the swirling cloud and the formed molecule — no chunk pops out);
+ *   - the GPGPU compute step is throttled to ~30fps (the denoise reads smooth
+ *     even when the sim only advances every other frame — render still samples
+ *     the latest position texture every frame);
+ *   - point size + additive alpha ease UP slightly to keep the cloud's density
+ *     and luminance constant as the count thins.
+ * All transitions are eased per-frame (no popping) and reverse when q recovers.
+ * At q=1 the full-quality denoise-into-caffeine is byte-identical to before.
  */
 import * as THREE from 'three';
 import { GPUComputationRenderer } from 'three/examples/jsm/misc/GPUComputationRenderer.js';
@@ -201,7 +216,7 @@ const cpuVert = /* glsl */ `
 
 /* ----------------------------- the scene --------------------------------- */
 export function heroField(handle: SceneHandle) {
-  const { ctx, onFrame, onDispose } = handle;
+  const { ctx, onFrame, onDispose, onQuality } = handle;
   const { scene, camera, renderer } = ctx;
   const reduced = prefersReducedMotion();
 
@@ -282,11 +297,35 @@ export function heroField(handle: SceneHandle) {
   const targetCol = new Float32Array(RENDER_COUNT * 3);
   caffeineTarget(targetPos, targetCol, RENDER_COUNT, molScale);
 
-  // references (texel uv per particle) for the GPGPU render shader
+  // references (texel uv per particle) for the GPGPU render shader.
+  // The texel index order is SHUFFLED (fixed permutation) so that rendering only
+  // the first `n` vertices (adaptive draw range) yields a spatially-uniform
+  // subset of both the cloud and the molecule — dropping the tail never carves a
+  // contiguous chunk (e.g. all the bond particles) out of the formed structure.
+  // aRef indexes the sim AND the target textures identically, so the shuffle
+  // keeps each particle paired to its own cloud-texel and molecule-texel.
   const refs = new Float32Array(RENDER_COUNT * 2);
-  for (let i = 0; i < RENDER_COUNT; i++) {
-    refs[i * 2] = (i % RENDER_W) / RENDER_W;
-    refs[i * 2 + 1] = Math.floor(i / RENDER_W) / RENDER_W;
+  {
+    const order = new Uint32Array(RENDER_COUNT);
+    for (let i = 0; i < RENDER_COUNT; i++) order[i] = i;
+    // Deterministic Fisher–Yates (mulberry32) — stable across reloads, no global
+    // RNG dependence, runs once at build (not per frame).
+    let s = 0x9e3779b9 >>> 0;
+    const rand = () => {
+      s |= 0; s = (s + 0x6d2b79f5) | 0;
+      let t = Math.imul(s ^ (s >>> 15), 1 | s);
+      t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    for (let i = RENDER_COUNT - 1; i > 0; i--) {
+      const j = Math.floor(rand() * (i + 1));
+      const tmp = order[i]; order[i] = order[j]; order[j] = tmp;
+    }
+    for (let i = 0; i < RENDER_COUNT; i++) {
+      const src = order[i];
+      refs[i * 2] = (src % RENDER_W) / RENDER_W;
+      refs[i * 2 + 1] = Math.floor(src / RENDER_W) / RENDER_W;
+    }
   }
 
   /* ----------------------------- geometry ------------------------------- */
@@ -416,6 +455,51 @@ export function heroField(handle: SceneHandle) {
 
   let progress = reduced ? 1 : 0;
 
+  /* --------------------- adaptive quality (governor) -------------------- */
+  // The hero always renders at full rate, so it carries a steady GPU cost. When
+  // the global governor reports the page is GPU-bound it calls onQuality(q) with
+  // q stepping 1 → 0.75 → 0.5; we scale the hero's OWN work down (and back up)
+  // smoothly. q=1 is byte-identical to the un-throttled full-quality look.
+  //
+  //   targetFrac     : fraction of particles drawn (eased via setDrawRange).
+  //   computeStride  : run gpu.compute() every Nth frame (throttle the sim to
+  //                    ~30fps when GPU-bound; the denoise reads smooth because
+  //                    the render still samples the latest position texture
+  //                    every frame — only the underlying swirl advances slower).
+  // Sizes/alpha scale up a touch as the count thins so density + luminance hold.
+  const Q_FRAC: Record<number, number> = { 1: 1, 0.75: 0.6, 0.5: 0.34 };
+  const Q_STRIDE: Record<number, number> = { 1: 1, 0.75: 2, 0.5: 2 };
+  let targetFrac = 1;          // where we're easing TO (set by onQuality)
+  let activeFrac = 1;          // current eased fraction
+  let computeStride = 1;       // 1 = every frame, 2 = ~30fps
+  let computeAccum = 0;        // frames since last compute (throttle counter)
+
+  // Only the GPGPU path adapts the draw range (the CPU fallback is already a tiny
+  // sparse cloud — thinning it would just look sparse). Reduced motion is a static
+  // single frame; nothing to throttle. Both keep the export signature intact.
+  const applyQuality = (q: number) => {
+    targetFrac = Q_FRAC[q] ?? 1;
+    computeStride = Q_STRIDE[q] ?? 1;
+    if (reduced || !usedGPGPU) targetFrac = 1; // keep full look on the static/CPU paths
+  };
+  onQuality(applyQuality);
+
+  // DEV/test hook (tree-shaken from production): lets Playwright simulate a
+  // governor quality drop/recovery without waiting for real GPU load, and read
+  // back the live adaptive state to assert work actually scaled. Drives the EXACT
+  // same applyQuality path the real governor uses.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as any).__HERO_FORCE_QUALITY__ = (q: number) => applyQuality(q);
+    (window as any).__HERO_ADAPT__ = () => ({
+      path: usedGPGPU ? `gpgpu-${WIDTH}` : `cpu-${RENDER_W}`,
+      renderCount: RENDER_COUNT,
+      targetFrac, activeFrac, computeStride,
+      drawCount: (geo.drawRange.count === Infinity ? RENDER_COUNT : geo.drawRange.count),
+      uSize: renderMat.uniforms.uSize?.value,
+      uAlpha: renderMat.uniforms.uAlpha?.value,
+    });
+  }
+
   /* ----------------------------- frame loop ----------------------------- */
   onFrame((t, dt) => {
     const delta = Math.min(dt, 1 / 30); // cap delta → no blowups, buttery
@@ -439,10 +523,35 @@ export function heroField(handle: SceneHandle) {
     const formProgress = Math.min(1, progress + breathe);
 
     if (usedGPGPU && gpu) {
-      velocityVariable.material.uniforms.uTime.value = t;
-      velocityVariable.material.uniforms.uDelta.value = delta;
-      positionVariable.material.uniforms.uDelta.value = delta;
-      gpu.compute();
+      // ease the active particle fraction toward the governor target (no popping)
+      activeFrac += (targetFrac - activeFrac) * Math.min(1, delta * 3);
+      // setDrawRange on the shuffled refs → spatially-uniform subset of cloud+mol.
+      // (Floor to whole particles; clamp ≥1 so we never request a zero-count draw.)
+      const drawCount = Math.max(1, Math.round(RENDER_COUNT * activeFrac));
+      geo.setDrawRange(0, drawCount);
+      // density/luminance compensation: fewer points → slightly bigger + brighter
+      // so the cloud doesn't visibly thin. 1/sqrt(frac) keeps screen coverage ~flat.
+      const comp = 1 / Math.sqrt(Math.max(0.2, activeFrac));
+      renderMat.uniforms.uSize.value = pointSize * Math.min(comp, 1.7);
+      renderMat.uniforms.uAlpha.value = alphaScale * Math.min(comp, 1.5);
+
+      // throttle the GPGPU sim to ~30fps when GPU-bound: skip compute on the
+      // off frames but accumulate their delta so the swirl speed is unchanged
+      // when it DOES step (no slow-motion). Render samples the latest texture
+      // every frame regardless → the eased denoise stays buttery-smooth.
+      computeAccum += delta;
+      const doCompute = computeStride <= 1 || (computeAccum >= (1 / 30));
+      if (doCompute) {
+        // Sim delta is still capped at 1/30 (the velocity shader's stable max) so
+        // a throttled step never blows up; `delta` itself is already ≤1/30, so at
+        // stride 1 this is identical to before.
+        const simDelta = Math.min(computeAccum, 1 / 30);
+        velocityVariable.material.uniforms.uTime.value = t;
+        velocityVariable.material.uniforms.uDelta.value = simDelta;
+        positionVariable.material.uniforms.uDelta.value = simDelta;
+        gpu.compute();
+        computeAccum = 0;
+      }
       renderMat.uniforms.texturePosition.value = gpu.getCurrentRenderTarget(positionVariable).texture;
       renderMat.uniforms.uProgress.value = formProgress;
       renderMat.uniforms.uTime.value = t;

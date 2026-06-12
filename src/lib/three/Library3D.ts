@@ -361,13 +361,87 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   const warm = new THREE.PointLight(PALETTE.amber, 46, 120, 1.8); warm.position.set(-7, 7, 17); scene.add(warm);
   const fill = new THREE.PointLight(0xffd9a0, 16, 110, 2.0); fill.position.set(8, -2, 16); scene.add(fill);
   const rim = new THREE.PointLight(PALETTE.cyan, 14, 90); rim.position.set(12, -3, 11); scene.add(rim);
-  // shadows: enable once on this scene's renderer; soft PCF, modest map size.
+  // shadows: enable once on this scene's renderer. The bookcase is mostly static,
+  // so the cast-shadow map is the single biggest GPU cost here — a 512 map
+  // re-rendered every frame from the warm key. We slash that two ways:
+  //   1) PCF (not PCFSoft) + a 512 map at full quality — visually near-identical
+  //      for these soft contact shadows, roughly a quarter of the fill cost.
+  //   2) shadow.autoUpdate = false — the map is NOT re-rendered every frame.
+  //      We flag needsUpdate only while the scene is actually moving (a book
+  //      pulls out, a scroll opens, a hover eases) and for the first frames, so
+  //      a still shelf costs zero shadow re-renders.
   const prevShadow = renderer.shadowMap.enabled;
-  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+  const prevShadowType = renderer.shadowMap.type;
+  const prevAutoUpdate = renderer.shadowMap.autoUpdate;
+  renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFShadowMap;
   warm.castShadow = true;
-  warm.shadow.mapSize.set(1024, 1024);
+  const SHADOW_FULL = 512, SHADOW_LOW = 256; // map size at full / GPU-bound quality
+  warm.shadow.mapSize.set(SHADOW_FULL, SHADOW_FULL);
   warm.shadow.bias = -0.0015; warm.shadow.radius = 4;
   warm.shadow.camera.near = 2; warm.shadow.camera.far = 90;
+  // Drive shadow refreshes ourselves instead of every frame.
+  warm.shadow.autoUpdate = false;
+  warm.shadow.needsUpdate = true; // render it once up front
+  // Quality state, driven by handle.onQuality below. shadowsOn=false (q<=0.5)
+  // disables cast shadows entirely; the warm interior wash + lighting still
+  // give the nook a cozy, softly-occluded read. updateEvery throttles how often
+  // an in-motion scene re-bakes the map (1 = every frame it moves, 2 = every
+  // other) so a degraded GPU does even less work.
+  let shadowsOn = true;
+  let shadowUpdateEvery = 1;
+  let shadowFrame = 0;
+  // Request a shadow re-bake on the next N frames of motion. Coalesced so a book
+  // pull, scroll open, hover ease, or quality change all flow through one path.
+  let shadowDirtyFrames = 0;
+  const markShadowDirty = (frames = 1) => { shadowDirtyFrames = Math.max(shadowDirtyFrames, frames); };
+  markShadowDirty(3); // first few frames: settle textures/lights before freezing
+
+  // ── adaptive quality: degrade shadows under a GPU-bound governor ───────────
+  // q=1.0  full: 512 PCF map, refresh on every motion frame (cozy + crisp).
+  // q=0.75 mid : 256 map, refresh every other motion frame (softer, ~1/4 cost).
+  // q<=0.5 low : cast shadows OFF entirely — the warm interior wash + lamp
+  //              lighting keep the nook reading as a softly-occluded cozy nook
+  //              with no shadow-map pass at all. Restores gracefully on recovery.
+  let curQ = 1;
+  const applyQuality = (q: number) => {
+    if (q === curQ) return;
+    curQ = q;
+    if (q <= 0.5) {
+      // drop cast shadows; lighting + baked AO wash carry the look
+      shadowsOn = false;
+      renderer.shadowMap.enabled = false;
+    } else {
+      const mid = q < 0.9;
+      shadowsOn = true;
+      renderer.shadowMap.enabled = true;
+      shadowUpdateEvery = mid ? 2 : 1;
+      const target = mid ? SHADOW_LOW : SHADOW_FULL;
+      if (warm.shadow.mapSize.x !== target) {
+        warm.shadow.mapSize.set(target, target);
+        // a resized shadow map must drop its old render target so three rebuilds it
+        warm.shadow.map?.dispose();
+        warm.shadow.map = null;
+      }
+      markShadowDirty(2); // re-bake at the new size/cadence right away
+    }
+  };
+  handle.onQuality(applyQuality);
+  // Dev-only bridge so the adaptive degradation can be exercised in tests without
+  // waiting on the real GPU governor. Mirrors core's __sceneStats debug hook;
+  // stripped from production builds.
+  if (import.meta.env.DEV) {
+    const w = window as unknown as {
+      __libQuality?: (q: number) => void;
+      __libShadowState?: () => { enabled: boolean; mapSize: number; updateEvery: number; on: boolean };
+    };
+    w.__libQuality = applyQuality;
+    w.__libShadowState = () => ({
+      enabled: renderer.shadowMap.enabled,
+      mapSize: warm.shadow.mapSize.x,
+      updateEvery: shadowUpdateEvery,
+      on: shadowsOn,
+    });
+  }
 
   const root = new THREE.Group();
   scene.add(root);
@@ -734,6 +808,10 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   const setSel = (i: number) => {
     selected = i;
     readyFired = false; // arm the completion signal for this new selection
+    // A book/scroll is about to move through its full open/close morph — keep the
+    // shadow map refreshing for the duration of that motion (handled per-frame
+    // below while anim values are changing).
+    markShadowDirty(2);
     const it = i >= 0 ? items[i] : null;
     window.dispatchEvent(new CustomEvent('library:open', { detail: it ? { kind: it.kind, ref: it.ref } : { kind: null, ref: -1 } }));
   };
@@ -752,8 +830,12 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     const hit = open ? null : ray.intersectObjects(hitMeshes, true)[0];
     let h = -1;
     if (hit) { let o: THREE.Object3D | null = hit.object; while (o && o.userData.index === undefined) o = o.parent; if (o) h = o.userData.index; }
+    const hoverChanged = h !== hovered; // hover enter/leave kicks off an easing motion
     hovered = h;
     renderer.domElement.style.cursor = hovered >= 0 || open ? 'pointer' : 'default';
+    // A new hover (or un-hover) starts a short ease that moves geometry — refresh
+    // the shadow for a couple of frames so the contact shadow tracks the lift.
+    if (hoverChanged) markShadowDirty(2);
 
     // time-based morph so it's slow + buttery smooth (frame-rate independent)
     const d = Math.min(dt, 0.05);
@@ -761,6 +843,9 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
       const dir = it.index === selected ? 1 : -1;
       const prev = anim[it.index];
       anim[it.index] = Math.min(1, Math.max(0, prev + (dir * d) / it.dur));
+      // While any item's open/close progress is changing, the scene is in motion
+      // and the frozen shadow map must be re-baked to follow it.
+      if (anim[it.index] !== prev) markShadowDirty(1);
       it.apply(anim[it.index], it.index === hovered && !open && anim[it.index] < 0.02);
       // Announce the exact frame a selected scroll's take-out + unroll finishes
       // (progress crosses to 1). The HTML reader modal listens for this so it
@@ -786,6 +871,22 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
       a.needsUpdate = true;
     }
 
+    // While a book/scroll is hovered (not yet open) it eases forward off the
+    // shelf each frame — a lerp that keeps the geometry drifting for a beat. Keep
+    // the contact shadow tracking that lift until it settles.
+    if (hovered >= 0 && !open) markShadowDirty(1);
+
+    // ── frozen-shadow bake gate ──────────────────────────────────────────────
+    // The shadow map is NOT auto-updated. We re-bake it only when the scene is
+    // in motion (shadowDirtyFrames > 0), and even then no more than once every
+    // `shadowUpdateEvery` frames when the GPU is degraded. A still shelf re-bakes
+    // zero shadows — the big win for this mostly-static scene.
+    if (shadowsOn && shadowDirtyFrames > 0) {
+      if (shadowFrame % shadowUpdateEvery === 0) warm.shadow.needsUpdate = true;
+      shadowDirtyFrames--;
+    }
+    shadowFrame++;
+
     // The bookcase intentionally does NOT react to the cursor — moving it makes
     // the interaction janky. Keep it perfectly still. (Per Andrew's request.)
   });
@@ -800,7 +901,15 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     woodMap.dispose(); woodRough.dispose();
     moteGeo.dispose(); moteMat.dispose(); moteTex.dispose();
     vignette.geometry.dispose(); vigMat.dispose(); vigTex.dispose();
-    renderer.shadowMap.enabled = prevShadow; // leave the renderer as we found it
+    if (import.meta.env.DEV) {
+      const w = window as unknown as { __libQuality?: unknown; __libShadowState?: unknown };
+      delete w.__libQuality; delete w.__libShadowState;
+    }
+    // leave the renderer as we found it
+    warm.shadow.map?.dispose();
+    renderer.shadowMap.enabled = prevShadow;
+    renderer.shadowMap.type = prevShadowType;
+    renderer.shadowMap.autoUpdate = prevAutoUpdate;
   });
 }
 
