@@ -32,17 +32,10 @@ try {
     <div class="hero__veil"></div>
     <div class="wrap hero__content">
       <p class="eyebrow hero__eyebrow" data-h="0">{SITE.school} · Chem Bio × CS</p>
-      <!-- Headline: the real <h1> stays in the DOM (selectable + crawlable + the
-           graceful fallback if WebGL/troika fails). When the crisp 3D SDF text
-           mounts over it, `.hero--3d` visually hides the DOM glyphs (text stays
-           in the a11y tree). The troika canvas lives in #hero-text, overlaid. -->
-      <div class="hero__headline">
-        <h1 class="display hero__title">
-          <span class="hero__line" data-h="1">Andrew</span>
-          <span class="hero__line hero__line--accent" data-h="2">Boldi</span>
-        </h1>
-        <div class="hero__text-3d" id="hero-text" aria-hidden="true"></div>
-      </div>
+      <h1 class="display hero__title">
+        <span class="hero__line" data-h="1">Andrew</span>
+        <span class="hero__line hero__line--accent" data-h="2">Boldi</span>
+      </h1>
       <p class="hero__lede" data-h="3">
         I solve the hardest problems in science with computation — teaching machines
         the language of <em>molecules</em>, <em>proteins</em>, and <em>matter</em>.
@@ -175,14 +168,13 @@ try {
   // float render targets are unavailable, so the hero never breaks.
   import { mount } from '@/lib/three/core';
   import { heroField } from '@/lib/three/HeroField';
-  import { heroText } from '@/lib/three/HeroText';
 
   // `mount()` registers its own `astro:before-swap` teardown (destroys the GPGPU
   // + removes the canvas) AND guards against double-mount via host.dataset.mounted.
   // So we (re)mount on every `astro:page-load`: idempotent on first paint, and it
   // re-creates the hero when the user navigates home → away → home. No persist
   // here — persisting a mount()-owned host would leave a destroyed, blank canvas.
-  const mountHero = () => {
+  const mountHero = () =>
     mount('#hero-field', (h) => heroField(h), {
       // Controlled glow only — the additive particle field is bright on its own, so
       // keep bloom gentle + threshold high to avoid blowing the molecule to white.
@@ -190,20 +182,6 @@ try {
       alpha: true,
       maxPixelRatio: 2,
     });
-
-    // Crisp glowing 3D headline — a SEPARATE, lightweight troika SDF overlay above
-    // the particle field (its own cheap mount; the GPGPU field is untouched). One
-    // text mesh, bloom-tuned to glow without blowing out (threshold 0.5).
-    const textHandle = mount('#hero-text', (h) => heroText(h), {
-      bloom: { strength: 0.5, radius: 0.5, threshold: 0.5 },
-      alpha: true,
-      maxPixelRatio: 2,
-      fov: 50,
-    });
-    // Progressive enhancement: only hide the DOM glyphs once the 3D text actually
-    // mounted. If WebGL/troika is unavailable, the real <h1> stays visible.
-    if (textHandle) document.querySelector('.hero__headline')?.classList.add('hero--3d');
-  };
   document.addEventListener('astro:page-load', mountHero);
 </script>
 
@@ -230,29 +208,6 @@ try {
     background: linear-gradient(96deg, var(--blue), var(--cyan) 60%, var(--cyan-soft));
     -webkit-background-clip: text; background-clip: text; color: transparent;
     width: fit-content;
-  }
-
-  /* ---------- crisp 3D headline overlay (troika) ---------- */
-  /* The <h1> defines the layout box (keeps lede/eyebrow positioned). The troika
-     canvas is laid OVER that box, matched in size, and rendered crisp + glowing. */
-  .hero__headline { position: relative; }
-  .hero__text-3d {
-    position: absolute; inset: 0; z-index: 1; pointer-events: none;
-  }
-  /* Progressive enhancement: once the 3D text mounts, hide the DOM glyphs
-     VISUALLY but keep them in the accessibility tree + selectable + crawlable
-     (clip technique, NOT display:none — so screen readers + crawlers still read
-     "Andrew Boldi"). If troika never mounts, this class is never added and the
-     real headline shows as the graceful fallback. */
-  .hero--3d .hero__title {
-    clip-path: inset(50%);
-    color: transparent;
-    -webkit-text-fill-color: transparent;
-    user-select: text; /* still selectable for copy */
-  }
-  @media (prefers-reduced-motion: reduce) {
-    /* reduced motion still gets the crisp (static) 3D text; nothing to relax here
-       — HeroText renders one static frame with no sweep. */
   }
   .hero__lede {
     max-width: 40ch; margin-top: 1.6rem; font-size: clamp(1.1rem, 1rem + 0.7vw, 1.5rem);
