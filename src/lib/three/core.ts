@@ -4,6 +4,24 @@
  * Every scene on the site is a small module that receives a host <div>, builds
  * its world, and returns nothing — lifecycle (RAF, resize, visibility pause,
  * reduced-motion, dispose) is handled here so individual scenes stay focused.
+ *
+ * PERFORMANCE ARCHITECTURE (added for the multi-scene pages, e.g. About ~10
+ * canvases at once):
+ *  - A single MODULE-LEVEL scheduler drives every active scene from ONE rAF.
+ *    Each scene gets a priority from its on-screen prominence (Intersection
+ *    Observer ratio × canvas area). Only the most-prominent 1–2 scenes render
+ *    at full 60fps; the rest are throttled (render every 2nd/3rd/… frame) or
+ *    frozen to their last frame when far off-screen. Every scene keeps its LOOK
+ *    — background scenes just update less often.
+ *  - Per-scene QUALITY TIERS pick the post chain: hero/feature scenes get the
+ *    full composer (bloom + filmic finish + SMAA + output); the many small TILE
+ *    scenes get a cheap chain (single bloom pass → output, no SMAA/no finish),
+ *    or a direct render — emissive compensation in registry keeps tiles glowing
+ *    rather than dim.
+ *  - An adaptive GOVERNOR samples a global rolling frame time and, when GPU
+ *    bound, steps quality down (drops the finish+SMAA passes on feature scenes,
+ *    lowers pixel ratio, and broadcasts a `quality` signal scenes can read to
+ *    cut particle counts); it recovers when frames are fast again.
  */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -101,6 +119,9 @@ export const prefersReducedMotion = () =>
   typeof matchMedia !== 'undefined' &&
   matchMedia('(prefers-reduced-motion: reduce)').matches;
 
+/** Scene quality tier — selects the post-processing chain + pixel-ratio cap. */
+export type SceneTier = 'hero' | 'feature' | 'tile';
+
 export interface SceneContext {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
@@ -113,6 +134,12 @@ export interface SceneContext {
   pointer: THREE.Vector2;
   width: number;
   height: number;
+  /**
+   * Adaptive quality in [0..1], driven by the global governor. 1 = full detail;
+   * lower when the page is GPU-bound. Scenes MAY read this to scale particle
+   * counts etc. — it changes rarely (hysteresis), so reading it per frame is fine.
+   */
+  readonly quality: number;
 }
 
 export interface SceneHandle {
@@ -121,6 +148,8 @@ export interface SceneHandle {
   onFrame: (cb: (t: number, dt: number) => void) => void;
   /** register extra cleanup */
   onDispose: (cb: () => void) => void;
+  /** subscribe to adaptive-quality changes (also fires once with the current value) */
+  onQuality: (cb: (q: number) => void) => void;
   destroy: () => void;
 }
 
@@ -139,25 +168,207 @@ export interface CreateSceneOpts {
   staticFallback?: boolean;
   /** cap the device pixel ratio (cheaper for large/background canvases) */
   maxPixelRatio?: number;
+  /**
+   * Quality tier (default 'feature'):
+   *  - 'hero'    full composer, pixelRatio ≤2 (≤1.5 under load), always high
+   *              scheduler priority. For the homepage centerpiece.
+   *  - 'feature' full composer (bloom + filmic finish + SMAA), pixelRatio ≤1.5.
+   *              The governor strips finish+SMAA from feature scenes first when
+   *              GPU-bound. For protein / molecule / lab feature scenes.
+   *  - 'tile'    CHEAP path: a single bloom pass → output (no SMAA, no filmic),
+   *              pixelRatio ≤1.0. For the many small scene tiles. Emissive
+   *              compensation lives in the scene/registry so tiles still glow.
+   */
+  tier?: SceneTier;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ *  MODULE-LEVEL SCHEDULER + GOVERNOR
+ *  One rAF drives all scenes. Per-scene priority decides render cadence so N
+ *  visible canvases no longer cost N× full renders every frame.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+interface SchedTask {
+  /** advance simulation + (maybe) render. Returns true if it actually rendered. */
+  step: (t: number, dt: number, render: boolean) => void;
+  /** prominence in [0..1]: intersectionRatio × normalized canvas area. */
+  priority: () => number;
+  /** true while on-screen and not reduced-motion-frozen. */
+  active: () => boolean;
+  /** stride bucket for throttled scenes (filled by the scheduler each frame). */
+  _stride: number;
+  _phase: number;
+}
+
+const tasks = new Set<SchedTask>();
+let schedRAF = 0;
+let frameIndex = 0;
+
+// Lightweight instrumentation: total number of ACTUAL scene renders performed
+// (composer.render / renderer.render). One integer add per render — negligible.
+// Exposed on window so perf tooling can sample renders/sec; this is the quantity
+// the scheduler exists to cut (N visible scenes no longer = N renders/frame).
+let sceneRenderCount = 0;
+let schedTicks = 0; // number of scheduler-loop iterations (detects rAF starvation)
+// Dev-only perf hooks (tree-shaken from production via import.meta.env.DEV): let
+// tooling sample renders/sec, scheduler tick rate, the stride histogram, and the
+// governor's current quality. The two counters above are plain integer adds in
+// the hot path (negligible) and stay in all builds; only the window surface is
+// gated so production ships nothing extra.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as unknown as { __sceneRenderCount: () => number }).__sceneRenderCount = () => sceneRenderCount;
+  (window as unknown as { __sceneStats: () => unknown }).__sceneStats = () => {
+    // Stride histogram across active scenes: how many render every frame (full
+    // rate) vs throttled. Proves the scheduler caps full-rate work regardless of
+    // how many scenes are visible.
+    const strides: Record<number, number> = {};
+    let active = 0;
+    for (const tk of tasks) {
+      if (!tk.active()) continue;
+      active++;
+      strides[tk._stride] = (strides[tk._stride] ?? 0) + 1;
+    }
+    return {
+      renders: sceneRenderCount,
+      schedTicks,
+      activeScenes: active,
+      totalScenes: tasks.size,
+      quality: qLevel,
+      avgFrameMs: avgFrame,
+      strideHistogram: strides, // e.g. {1:2, 2:2, 3:8} = 2 full, 2 half, 8 third-rate
+    };
+  };
+}
+
+// ---- governor state (global, shared by all scenes) ----
+let qLevel = 1; // current broadcast quality in [0..1]
+const qSubs = new Set<(q: number) => void>();
+let avgFrame = 16.7; // rolling average frame time (ms)
+let slowAccum = 0; // ms spent "slow" (debounce stepping down)
+let fastAccum = 0; // ms spent "fast" (debounce stepping up)
+// Thresholds: step DOWN when sustained avg > 22ms (~45fps); step UP when
+// sustained avg < 15ms (~66fps). Hysteresis via the accum debounce windows.
+const SLOW_MS = 22;
+const FAST_MS = 15;
+const STEP_DEBOUNCE = 900; // ms a condition must persist before we change qLevel
+const Q_STEPS = [1, 0.75, 0.5]; // quality ladder
+
+function setQuality(next: number) {
+  if (next === qLevel) return;
+  qLevel = next;
+  for (const cb of qSubs) { try { cb(qLevel); } catch { /* noop */ } }
+}
+
+function governorTick(frameMs: number) {
+  // EMA of frame time; ignore absurd spikes (tab refocus, GC) so one hitch
+  // doesn't yank quality.
+  if (frameMs > 0 && frameMs < 500) avgFrame += (frameMs - avgFrame) * 0.1;
+
+  const idx = Q_STEPS.indexOf(qLevel);
+  if (avgFrame > SLOW_MS) {
+    slowAccum += frameMs; fastAccum = 0;
+    if (slowAccum > STEP_DEBOUNCE && idx < Q_STEPS.length - 1) {
+      setQuality(Q_STEPS[idx + 1]);
+      slowAccum = 0;
+    }
+  } else if (avgFrame < FAST_MS) {
+    fastAccum += frameMs; slowAccum = 0;
+    if (fastAccum > STEP_DEBOUNCE && idx > 0) {
+      setQuality(Q_STEPS[idx - 1]);
+      fastAccum = 0;
+    }
+  } else {
+    slowAccum = 0; fastAccum = 0;
+  }
+}
+
+/** Number of full-rate scenes (rest are throttled). Tunable budget. */
+const FULL_RATE_BUDGET = 2;
+
+function assignStrides() {
+  // Rank active tasks by priority; the top FULL_RATE_BUDGET render every frame,
+  // the next tier every 2nd frame, the rest every 3rd (or 4th when GPU-bound).
+  const live: SchedTask[] = [];
+  for (const tk of tasks) if (tk.active()) live.push(tk);
+  live.sort((a, b) => b.priority() - a.priority());
+  const farStride = qLevel < 1 ? 4 : 3;
+  for (let i = 0; i < live.length; i++) {
+    const tk = live[i];
+    if (i < FULL_RATE_BUDGET) tk._stride = 1;
+    else if (i < FULL_RATE_BUDGET + 2) tk._stride = 2;
+    else tk._stride = farStride;
+  }
+}
+
+let schedLast = 0;
+function schedulerLoop(now: number) {
+  schedRAF = requestAnimationFrame(schedulerLoop);
+  const frameMs = schedLast ? now - schedLast : 16.7;
+  schedLast = now;
+  if (document.hidden) return;
+  schedTicks++;
+
+  governorTick(frameMs);
+  assignStrides();
+
+  const t = now / 1000;
+  const dt = Math.min(frameMs / 1000, 0.05);
+  for (const tk of tasks) {
+    if (!tk.active()) continue;
+    const render = (frameIndex % tk._stride) === tk._phase % tk._stride;
+    tk.step(t, dt, render);
+  }
+  frameIndex++;
+}
+
+function ensureScheduler() {
+  if (!schedRAF) {
+    schedLast = 0;
+    schedRAF = requestAnimationFrame(schedulerLoop);
+  }
+}
+
+function addTask(tk: SchedTask) {
+  tk._phase = tasks.size; // de-sync throttled renders across scenes
+  tasks.add(tk);
+  ensureScheduler();
+}
+
+function removeTask(tk: SchedTask) {
+  tasks.delete(tk);
+  if (tasks.size === 0 && schedRAF) {
+    cancelAnimationFrame(schedRAF);
+    schedRAF = 0;
+  }
 }
 
 /**
- * Bootstraps a renderer + scene + camera sized to `host`, wires the animation
- * loop, pauses when scrolled off-screen, and respects reduced-motion.
+ * Bootstraps a renderer + scene + camera sized to `host`, registers itself with
+ * the shared scheduler, pauses when scrolled off-screen, and respects
+ * reduced-motion.
  */
 export function createScene(opts: CreateSceneOpts): SceneHandle {
   const { host } = opts;
   const reduced = prefersReducedMotion();
+  const tier: SceneTier = opts.tier ?? 'feature';
 
   const width = host.clientWidth || 1;
   const height = host.clientHeight || 1;
 
+  // Per-tier pixel-ratio cap (tiles ≤1, feature ≤1.5, hero ≤2). An explicit
+  // opts.maxPixelRatio still wins so callers can override.
+  const tierCap = tier === 'tile' ? 1 : tier === 'hero' ? 2 : 1.5;
+  const baseCap = opts.maxPixelRatio ?? tierCap;
+
   const renderer = new THREE.WebGLRenderer({
-    antialias: true,
+    // Native MSAA only matters when rendering straight to screen (tiles with no
+    // composer). The full composer adds SMAA instead, so AA there is redundant.
+    antialias: tier === 'tile' || !opts.bloom,
     alpha: opts.alpha ?? true,
     powerPreference: 'high-performance',
   });
-  renderer.setPixelRatio(Math.min(devicePixelRatio, opts.maxPixelRatio ?? 2));
+  let curPixelRatio = Math.min(devicePixelRatio, baseCap);
+  renderer.setPixelRatio(curPixelRatio);
   renderer.setSize(width, height);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
   renderer.toneMappingExposure = 1.0;
@@ -168,14 +379,23 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   const camera = new THREE.PerspectiveCamera(opts.fov ?? 55, width / height, 0.1, 4000);
   camera.position.z = opts.cameraZ ?? 6;
 
+  // ── Post-processing chain, built per tier ───────────────────────────────
   let composer: EffectComposer | null = null;
   let bloomPass: UnrealBloomPass | null = null;
   let finishPass: ShaderPass | null = null;
+  let smaaPass: SMAAPass | null = null;
+  let renderPass: RenderPass | null = null;
+  let outputPass: OutputPass | null = null;
+  // Whether the "premium" finish+SMAA passes are currently enabled (governor may
+  // strip them on feature scenes under load). Tiles never have them.
+  let premiumOn = tier !== 'tile';
+
   if (opts.bloom) {
     composer = new EffectComposer(renderer);
-    composer.addPass(new RenderPass(scene, camera));
-    // Bloom (linear). Default threshold raised 0.1 -> 0.5 so only genuinely
-    // bright/emissive accents glow instead of washing the whole frame to mush.
+    renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+    // Bloom (linear). Default threshold 0.5 so only genuinely bright/emissive
+    // accents glow instead of washing the whole frame to mush.
     bloomPass = new UnrealBloomPass(
       new THREE.Vector2(width, height),
       opts.bloom.strength ?? 0.8,
@@ -183,28 +403,54 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
       opts.bloom.threshold ?? 0.5,
     );
     composer.addPass(bloomPass);
-    // Combined filmic finish: vignette + faint grain + ordered dither (linear).
-    finishPass = new ShaderPass(FilmicFinishShader);
-    finishPass.uniforms.uResolution.value.set(width, height);
-    composer.addPass(finishPass);
-    // Anti-aliasing: the composer bypasses native MSAA, so thin science
-    // geometry shimmers without this. SMAA runs in linear-srgb, before output.
-    composer.addPass(new SMAAPass());
-    // OutputPass stays LAST: the only tonemap (ACES) + linear->sRGB step.
-    composer.addPass(new OutputPass());
+
+    if (tier === 'tile') {
+      // CHEAP path: bloom → output only. No filmic finish, no SMAA fullscreen
+      // pass. Tiles rely on emissive/threshold tuning (registry) to still glow.
+      outputPass = new OutputPass();
+      composer.addPass(outputPass);
+    } else {
+      // FULL path (hero/feature): vignette+grain+dither, then SMAA, then output.
+      finishPass = new ShaderPass(FilmicFinishShader);
+      finishPass.uniforms.uResolution.value.set(width, height);
+      composer.addPass(finishPass);
+      smaaPass = new SMAAPass();
+      composer.addPass(smaaPass);
+      outputPass = new OutputPass();
+      composer.addPass(outputPass);
+    }
   }
 
+  // Rebuild the pass list when the governor toggles premium quality on a feature
+  // scene. Cheaper than per-frame `pass.enabled` because EffectComposer still
+  // copies through disabled passes; we drop them from the chain entirely.
+  const rebuildPasses = () => {
+    if (!composer || tier === 'tile' || !renderPass || !bloomPass || !outputPass) return;
+    composer.passes.length = 0;
+    composer.addPass(renderPass);
+    composer.addPass(bloomPass);
+    if (premiumOn && finishPass && smaaPass) {
+      composer.addPass(finishPass);
+      composer.addPass(smaaPass);
+    }
+    composer.addPass(outputPass);
+  };
+
+  const ctxState = { quality: qLevel };
   const ctx: SceneContext = {
     scene, camera, renderer, composer, host,
     clock: new THREE.Clock(),
     pointer: new THREE.Vector2(0, 0),
     width, height,
+    get quality() { return ctxState.quality; },
   };
 
   const frameCbs: Array<(t: number, dt: number) => void> = [];
   const disposeCbs: Array<() => void> = [];
+  const qualityCbs: Array<(q: number) => void> = [];
   const onFrame = (cb: (t: number, dt: number) => void) => frameCbs.push(cb);
   const onDispose = (cb: () => void) => disposeCbs.push(cb);
+  const onQuality = (cb: (q: number) => void) => { qualityCbs.push(cb); cb(ctxState.quality); };
 
   // ---- pointer (eased toward target) ----
   const targetPointer = new THREE.Vector2(0, 0);
@@ -219,6 +465,20 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
 
   // ---- resize ----
   let resizeRAF = 0;
+  const applyPixelRatio = () => {
+    // Under load the governor pulls hero/feature pixel ratio toward 1; tiles are
+    // already capped at 1 so this is a no-op there.
+    const loadScale = qLevel >= 1 ? 1 : qLevel >= 0.75 ? 0.85 : 0.7;
+    const want = Math.min(devicePixelRatio, baseCap) * (tier === 'tile' ? 1 : loadScale);
+    const clamped = Math.max(1, want);
+    if (Math.abs(clamped - curPixelRatio) > 0.01) {
+      curPixelRatio = clamped;
+      renderer.setPixelRatio(clamped);
+      renderer.setSize(ctx.width, ctx.height);
+      composer?.setSize(ctx.width, ctx.height);
+      finishPass?.uniforms.uResolution.value.set(ctx.width, ctx.height);
+    }
+  };
   const ro = new ResizeObserver(() => {
     cancelAnimationFrame(resizeRAF);
     resizeRAF = requestAnimationFrame(() => {
@@ -234,50 +494,88 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   });
   ro.observe(host);
 
-  // ---- visibility (pause when off-screen) ----
+  // ---- visibility + prominence (drives scheduler priority) ----
   let visible = true;
+  let ratio = 1; // intersectionRatio in [0..1]
   const vis = new IntersectionObserver(
-    ([e]) => { visible = e.isIntersecting; },
-    { threshold: 0 },
+    ([e]) => {
+      visible = e.isIntersecting;
+      ratio = e.intersectionRatio;
+    },
+    // Multiple thresholds so prominence is continuous, not just on/off.
+    { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] },
   );
   vis.observe(host);
 
   const render = (t = 0) => {
-    if (finishPass) finishPass.uniforms.uTime.value = t;
+    if (finishPass && premiumOn) finishPass.uniforms.uTime.value = t;
+    sceneRenderCount++;
     return composer ? composer.render() : renderer.render(scene, camera);
   };
 
-  let raf = 0;
-  let last = 0;
-  const tick = () => {
-    raf = requestAnimationFrame(tick);
-    if (!visible || document.hidden) return;
-    const t = ctx.clock.getElapsedTime();
-    const dt = Math.min(t - last, 0.05);
-    last = t;
-    ctx.pointer.lerp(targetPointer, 0.06);
-    for (const cb of frameCbs) cb(t, dt);
-    render(t);
+  // ── React to governor quality changes ──────────────────────────────────
+  const onGlobalQuality = (q: number) => {
+    ctxState.quality = q;
+    // Feature scenes drop the premium finish+SMAA passes first when GPU-bound.
+    const wantPremium = tier === 'hero' ? true : tier === 'feature' ? q >= 0.75 : false;
+    if (wantPremium !== premiumOn && tier !== 'tile') {
+      premiumOn = wantPremium;
+      rebuildPasses();
+    }
+    applyPixelRatio();
+    for (const cb of qualityCbs) { try { cb(q); } catch { /* noop */ } }
+  };
+  qSubs.add(onGlobalQuality);
+
+  // ── Scheduler task ─────────────────────────────────────────────────────
+  // Cache a rough normalized area weight (updated on resize via ctx.width/height).
+  const areaWeight = () => {
+    const a = (ctx.width * ctx.height) / (1280 * 720); // relative to a ~720p tile
+    return Math.min(1, a);
+  };
+  const task: SchedTask = {
+    _stride: 1,
+    _phase: 0,
+    active: () => visible && !document.hidden,
+    // Prominence: how centered/large on screen. Area gives big hero canvases a
+    // boost; ratio fades scenes near the viewport edges.
+    priority: () => ratio * (0.4 + 0.6 * areaWeight()) + (tier === 'hero' ? 1 : 0),
+    // Each scene keeps its OWN clock time (seconds since it started) so per-scene
+    // animation phase/intro logic is byte-identical to the old per-scene rAF; the
+    // shared scheduler only supplies the frame delta and the render gate.
+    step: (_t, dt, doRender) => {
+      const st = ctx.clock.getElapsedTime();
+      ctx.pointer.lerp(targetPointer, 0.06);
+      for (const cb of frameCbs) cb(st, dt);
+      if (doRender) render(st);
+    },
   };
 
-  // First frame always renders (so reduced-motion users see the static world).
+  // First frame always renders (so reduced-motion / first paint shows the world).
   const start = () => {
     if (reduced && opts.staticFallback !== false) {
-      // run one synchronous frame, then stop
+      // run one synchronous frame, then stop — no scheduler registration.
       requestAnimationFrame(() => {
         for (const cb of frameCbs) cb(0, 0);
         render();
       });
       return;
     }
-    tick();
+    // Render one immediate frame so the canvas isn't blank before its first
+    // scheduled (possibly throttled) turn, then join the shared loop.
+    requestAnimationFrame(() => {
+      for (const cb of frameCbs) cb(0, 0);
+      render(0);
+      addTask(task);
+    });
   };
 
   let destroyed = false;
   const destroy = () => {
     if (destroyed) return;
     destroyed = true;
-    cancelAnimationFrame(raf);
+    removeTask(task);
+    qSubs.delete(onGlobalQuality);
     cancelAnimationFrame(resizeRAF);
     ro.disconnect();
     vis.disconnect();
@@ -298,7 +596,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   // defer start one tick so the host has laid out
   requestAnimationFrame(start);
 
-  return { ctx, onFrame, onDispose, destroy };
+  return { ctx, onFrame, onDispose, onQuality, destroy };
 }
 
 /**
