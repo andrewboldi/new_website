@@ -204,7 +204,7 @@ export function massSpec(handle: SceneHandle) {
     crownX, crownTopY + 0.7, 0, crownX + 1.1, crownTopY + 1.6, 0,
   ], 3).setUsage(THREE.DynamicDrawUsage));
   const crownMat = new THREE.LineBasicMaterial({
-    color: PALETTE.amber, transparent: true, opacity: 0.9,
+    color: PALETTE.amber, transparent: true, opacity: 0.6,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const crown = new THREE.LineSegments(crownGeo, crownMat);
@@ -215,7 +215,7 @@ export function massSpec(handle: SceneHandle) {
   sweepGeo.setAttribute('position', new THREE.Float32BufferAttribute(
     [0, FLOOR - 1, 0, 0, FLOOR + MAXH + 2, 0], 3).setUsage(THREE.DynamicDrawUsage));
   const sweepMat = new THREE.LineBasicMaterial({
-    color: PALETTE.white, transparent: true, opacity: 0.5,
+    color: PALETTE.white, transparent: true, opacity: 0.32,
     blending: THREE.AdditiveBlending, depthWrite: false,
   });
   const sweep = new THREE.Line(sweepGeo, sweepMat);
@@ -255,7 +255,7 @@ export function massSpec(handle: SceneHandle) {
     fragmentShader: /* glsl */ `
       varying vec3 vColor;
       void main() { float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard;
-        gl_FragColor = vec4(mix(vColor, vec3(1.0), smoothstep(0.5,0.0,d)*0.5), smoothstep(0.5, 0.12, d)); }`,
+        gl_FragColor = vec4(mix(vColor, vec3(1.0), smoothstep(0.5,0.0,d)*0.32), smoothstep(0.5, 0.12, d) * 0.78); }`,
   });
   group.add(new THREE.Points(motGeo, motMat));
   // motif bonds (ring)
@@ -304,12 +304,14 @@ export function massSpec(handle: SceneHandle) {
       const hf = sticks[s].h;
       tmp.copy(cLow).lerp(cHigh, Math.min(1, hf * 1.1));
       const near = Math.max(0, 1 - Math.abs(stickX[s] - sweepXpos) / 2.5);
-      tmp.lerp(cHot, near * 0.85);
+      tmp.lerp(cHot, near * 0.6);
       // base peak family keeps an amber crown tint at the top
-      if (fi === basePeakFam) tmp.lerp(cHot, 0.18 * frac[i]);
-      const b = 0.5 + 0.5 * grown[fi];
+      if (fi === basePeakFam) tmp.lerp(cHot, 0.14 * frac[i]);
+      // Keep peaks legible as distinct lines: cap brightness so overlapping
+      // M/M+1/M+2 sticks don't additively bloom into a white wall.
+      const b = (0.34 + 0.4 * grown[fi]) * (0.85 + near * 0.25);
       colors[i3] = tmp.r * b; colors[i3 + 1] = tmp.g * b; colors[i3 + 2] = tmp.b * b;
-      scales[i] = (1.1 + hf * 1.5) * (1 + near * 0.9);
+      scales[i] = (0.85 + hf * 1.0) * (1 + near * 0.55);
     }
     geo.attributes.position.needsUpdate = true;
     geo.attributes.aColor.needsUpdate = true;
@@ -324,7 +326,7 @@ export function massSpec(handle: SceneHandle) {
 
     // crown brightness pulses when the sweep crosses the base peak
     const crownNear = Math.max(0, 1 - Math.abs(crownX - sweepXpos) / 4);
-    crownMat.opacity = 0.5 + 0.5 * grown[basePeakFam] * (0.6 + 0.4 * crownNear);
+    crownMat.opacity = 0.32 + 0.34 * grown[basePeakFam] * (0.6 + 0.4 * crownNear);
 
     // fragmenting motif: atoms drift outward in a periodic "fragmentation",
     // synced to the sweep, then snap home and repeat.

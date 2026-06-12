@@ -105,7 +105,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
   const edges = new THREE.LineSegments(
     edgeGeo,
     new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.9,
+      vertexColors: true, transparent: true, opacity: 0.7,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }),
   );
@@ -128,7 +128,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
   const strongEdges = new THREE.LineSegments(
     strongGeo,
     new THREE.LineBasicMaterial({
-      vertexColors: true, transparent: true, opacity: 0.85,
+      vertexColors: true, transparent: true, opacity: 0.62,
       blending: THREE.AdditiveBlending, depthWrite: false,
     }),
   );
@@ -161,7 +161,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
         vBias = aBias;
         float breathe = 0.85 + 0.15 * sin(uTime * 1.3 + aPhase); // idle life
         vec4 mv = modelViewMatrix * vec4(position, 1.0);
-        float size = (6.0 + aBias * 4.0 + vAct * 30.0) * breathe;
+        float size = (6.0 + aBias * 4.0 + vAct * 20.0) * breathe;
         gl_PointSize = size * (300.0 / -mv.z) / 14.0;
         gl_Position = projectionMatrix * mv;
       }`,
@@ -173,10 +173,11 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
         vec3 cool = vec3(0.0, 0.6, 1.0);     // resting blue
         vec3 warm = vec3(0.22, 0.91, 0.78);  // firing cyan
         vec3 c = mix(cool, warm, vAct);
-        c = mix(c, vec3(1.0), vAct * 0.7);   // white-hot core when firing
+        c = mix(c, vec3(1.0), vAct * 0.45);  // warm core when firing (not blown to white)
         float core = smoothstep(0.5, 0.0, d);
         float halo = smoothstep(0.5, 0.12, d);
-        float a = halo * (0.30 + vBias * 0.20 + vAct * 0.55) + core * vAct * 0.4;
+        // Keep node + halo readable rather than a drowning glow.
+        float a = halo * (0.22 + vBias * 0.16 + vAct * 0.40) + core * vAct * 0.30;
         gl_FragColor = vec4(c, a);
       }`,
   });
@@ -208,7 +209,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
       varying vec3 vColor; varying float vA;
       void main() { if (vA < 0.5) discard;
         float d = length(gl_PointCoord - 0.5); if (d > 0.5) discard;
-        gl_FragColor = vec4(mix(vColor, vec3(1.0), 0.4), smoothstep(0.5, 0.0, d)); }`,
+        gl_FragColor = vec4(mix(vColor, vec3(1.0), 0.25), smoothstep(0.5, 0.0, d) * 0.8); }`,
   });
   group.add(new THREE.Points(pkGeo, pkMat));
 
@@ -227,8 +228,8 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
     pkSpeed[slot] = 1.6 + Math.random() * 1.2;
     pkAlive[slot] = 1;
     const w = edgeW[edgeIdx];
-    tmpC.copy(w >= 0 ? exc : inh).lerp(new THREE.Color(0xffffff), 0.25);
-    pkCol[slot * 3] = tmpC.r; pkCol[slot * 3 + 1] = tmpC.g; pkCol[slot * 3 + 2] = tmpC.b;
+    tmpC.copy(w >= 0 ? exc : inh).lerp(new THREE.Color(0xffffff), 0.15);
+    pkCol[slot * 3] = tmpC.r * 0.78; pkCol[slot * 3 + 1] = tmpC.g * 0.78; pkCol[slot * 3 + 2] = tmpC.b * 0.78;
   };
 
   // Precompute, per strong edge, endpoint coords for fast packet interpolation.
@@ -254,7 +255,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
       const w = edgeW[i];
       tmp.copy(w >= 0 ? exc2 : inh2);
       const base = 0.05 + Math.abs(w) * 0.12;
-      const lvl = base + act * (0.5 + Math.abs(w) * 0.6);
+      const lvl = base + act * (0.34 + Math.abs(w) * 0.42);
       edgeCol[i * 6] = tmp.r * lvl; edgeCol[i * 6 + 1] = tmp.g * lvl; edgeCol[i * 6 + 2] = tmp.b * lvl;
       edgeCol[i * 6 + 3] = tmp.r * lvl; edgeCol[i * 6 + 4] = tmp.g * lvl; edgeCol[i * 6 + 5] = tmp.b * lvl;
     }
@@ -264,7 +265,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
       const act = Math.exp(-(d * d) / 12);
       const w = edgeW[i];
       tmp.copy(w >= 0 ? exc2 : inh2).lerp(hot, act);
-      const lvl = act * (0.6 + Math.abs(w));
+      const lvl = act * (0.42 + Math.abs(w) * 0.7);
       for (let s = 0; s < 2; s++) {
         sCol[k * 6 + s * 3] = tmp.r * lvl; sCol[k * 6 + s * 3 + 1] = tmp.g * lvl; sCol[k * 6 + s * 3 + 2] = tmp.b * lvl;
       }
@@ -298,7 +299,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
       const w = edgeW[i];
       tmp.copy(w >= 0 ? exc2 : inh2);
       const base = 0.05 + Math.abs(w) * 0.12;
-      const lvl = base + act * (0.5 + Math.abs(w) * 0.6);
+      const lvl = base + act * (0.34 + Math.abs(w) * 0.42);
       edgeCol[i * 6] = tmp.r * lvl; edgeCol[i * 6 + 1] = tmp.g * lvl; edgeCol[i * 6 + 2] = tmp.b * lvl;
       edgeCol[i * 6 + 3] = tmp.r * lvl; edgeCol[i * 6 + 4] = tmp.g * lvl; edgeCol[i * 6 + 5] = tmp.b * lvl;
     }
@@ -311,7 +312,7 @@ export function neuralNet(handle: SceneHandle, opts: { reverse?: boolean } = {})
       const act = Math.exp(-(d * d) / 12);
       const w = edgeW[i];
       tmp.copy(w >= 0 ? exc2 : inh2).lerp(hot, act * 0.8);
-      const lvl = act * (0.6 + Math.abs(w));
+      const lvl = act * (0.42 + Math.abs(w) * 0.7);
       for (let s = 0; s < 2; s++) {
         sCol[k * 6 + s * 3] = tmp.r * lvl; sCol[k * 6 + s * 3 + 1] = tmp.g * lvl; sCol[k * 6 + s * 3 + 2] = tmp.b * lvl;
       }
