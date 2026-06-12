@@ -169,57 +169,101 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
   </div>
 
   <script>
-    import { startCardFx } from '@/lib/cardfx/engine';
-    import { startWorkHScroll } from '@/scripts/work-hscroll';
+    import { startCardFx, type CardFxController } from '@/lib/cardfx/engine';
+    import { startWorkHScroll, type HScrollController } from '@/scripts/work-hscroll';
 
-    // ---- per-project Canvas2D background animations ----
-    // One shared rAF loop drives every card's <canvas>; offscreen / filtered-out
-    // cards are skipped, fps is capped, and prefers-reduced-motion is honored.
-    startCardFx(document);
+    // ============================================================
+    // Work page controllers are transition-aware (Astro ClientRouter).
+    // Neither startCardFx nor startWorkHScroll registers its own swap teardown,
+    // so without this they would LEAK on leaving /work: the shared cardfx rAF
+    // would keep ticking detached canvases and the hscroll scroll-listener + rAF
+    // would keep firing against a torn-out gallery. We therefore:
+    //   • init both on every `astro:page-load` (re-measures the pinned scroll +
+    //     re-creates the cardfx loop against the freshly swapped-in nodes)
+    //   • destroy() both on `astro:before-swap` (cancels rAF, removes the scroll
+    //     /resize/filter listeners) so leaving /work stops every loop dead.
+    // ============================================================
+    let hscroll: HScrollController | null = null;
+    let cardfx: CardFxController | null = null;
 
-    // ---- pinned horizontal-scroll gallery ----
-    // Maps vertical scroll -> horizontal track translateX with inertial LERP,
-    // velocity skew/streak, per-card centre-cross reveal, and a progress rail.
-    // Returns null (no-op) under prefers-reduced-motion -> the grid fallback wins.
-    const hscroll = startWorkHScroll(document);
+    const initWork = () => {
+      // guard: only run on the work page (this listener lives on document and
+      // would otherwise fire for every page once registered)
+      const gallery = document.getElementById('projGallery');
+      if (!gallery) return;
 
-    // ---- category filter chips ----
-    // We toggle a `.proj--out` class instead of removing nodes, so the
-    // scroll-reveal/focus state is preserved. After filtering we fire a
-    // `work:filter` event so the horizontal controller re-measures track width.
-    const gallery = document.getElementById('projGallery');
-    const grid = document.getElementById('projGrid');
-    const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('.chip'));
-    const empty = document.getElementById('projEmpty');
+      // tear down any prior instances before re-creating (defensive)
+      cardfx?.destroy();
+      hscroll?.destroy();
 
-    function apply(filter: string) {
-      const cards = Array.from(grid?.querySelectorAll<HTMLElement>('.proj') ?? []);
-      let shown = 0;
-      cards.forEach((card) => {
-        const match = filter === 'all' || card.dataset.cat === filter;
-        card.classList.toggle('proj--out', !match);
-        if (match) shown++;
-      });
-      if (empty) empty.hidden = shown !== 0;
-      // re-measure horizontal track (no-op if reduced-motion fallback is active)
-      gallery?.dispatchEvent(new CustomEvent('work:filter'));
-      // also snap the page back to the gallery top so the user sees the new set
-      if (hscroll && gallery) {
-        const top = gallery.getBoundingClientRect().top + window.scrollY;
-        if (window.scrollY > top) window.scrollTo({ top, behavior: 'smooth' });
+      // ---- per-project Canvas2D background animations ----
+      // One shared rAF loop drives every card's <canvas>; offscreen / filtered-out
+      // cards are skipped, fps is capped, and prefers-reduced-motion is honored.
+      cardfx = startCardFx(document);
+
+      // ---- pinned horizontal-scroll gallery ----
+      // Maps vertical scroll -> horizontal track translateX with inertial LERP,
+      // velocity skew/streak, per-card centre-cross reveal, and a progress rail.
+      // Returns null (no-op) under prefers-reduced-motion -> the grid fallback wins.
+      hscroll = startWorkHScroll(document);
+
+      // SPA-nav safety net: after a soft navigation the swapped-in layout can
+      // settle a few frames late, so the controller's first measure() may read a
+      // not-yet-tall section (breaking the pin). The controller re-measures on
+      // the next frames AND on resize; we nudge one more re-measure shortly after
+      // page-load to cover slower swaps. (No-op under reduced-motion: hscroll is
+      // null and the resize handler simply isn't wired.)
+      if (hscroll) {
+        setTimeout(() => window.dispatchEvent(new Event('resize')), 250);
       }
-    }
 
-    chips.forEach((chip) => {
-      chip.addEventListener('click', () => {
-        chips.forEach((c) => {
-          const on = c === chip;
-          c.classList.toggle('chip--on', on);
-          c.setAttribute('aria-pressed', String(on));
+      // ---- category filter chips ----
+      // We toggle a `.proj--out` class instead of removing nodes, so the
+      // scroll-reveal/focus state is preserved. After filtering we fire a
+      // `work:filter` event so the horizontal controller re-measures track width.
+      const grid = document.getElementById('projGrid');
+      const chips = Array.from(document.querySelectorAll<HTMLButtonElement>('.chip'));
+      const empty = document.getElementById('projEmpty');
+
+      function apply(filter: string) {
+        const cards = Array.from(grid?.querySelectorAll<HTMLElement>('.proj') ?? []);
+        let shown = 0;
+        cards.forEach((card) => {
+          const match = filter === 'all' || card.dataset.cat === filter;
+          card.classList.toggle('proj--out', !match);
+          if (match) shown++;
         });
-        apply(chip.dataset.filter ?? 'all');
+        if (empty) empty.hidden = shown !== 0;
+        // re-measure horizontal track (no-op if reduced-motion fallback is active)
+        gallery?.dispatchEvent(new CustomEvent('work:filter'));
+        // also snap the page back to the gallery top so the user sees the new set
+        if (hscroll && gallery) {
+          const top = gallery.getBoundingClientRect().top + window.scrollY;
+          if (window.scrollY > top) window.scrollTo({ top, behavior: 'smooth' });
+        }
+      }
+
+      // chips live inside <main> (swapped each nav), so these listeners die with
+      // the old nodes; we re-bind against the fresh chips on every page-load.
+      chips.forEach((chip) => {
+        chip.addEventListener('click', () => {
+          chips.forEach((c) => {
+            const on = c === chip;
+            c.classList.toggle('chip--on', on);
+            c.setAttribute('aria-pressed', String(on));
+          });
+          apply(chip.dataset.filter ?? 'all');
+        });
       });
-    });
+    };
+
+    const teardownWork = () => {
+      cardfx?.destroy(); cardfx = null;
+      hscroll?.destroy(); hscroll = null;
+    };
+
+    document.addEventListener('astro:page-load', initWork);
+    document.addEventListener('astro:before-swap', teardownWork);
   </script>
 </Base>
 

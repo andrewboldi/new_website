@@ -103,125 +103,168 @@ const cmds = [
 
 <script>
   import { SITE } from '@/lib/site';
+  import { navigate } from 'astro:transitions/client';
 
-  const bar = document.getElementById('scrollbar')!;
-  const totop = document.getElementById('totop')!;
-  const onScroll = () => {
-    const h = document.documentElement.scrollHeight - innerHeight;
-    const p = h > 0 ? scrollY / h : 0;
-    bar.style.width = `${p * 100}%`;
-    totop.classList.toggle('show', scrollY > innerHeight * 0.7);
-  };
-  addEventListener('scroll', onScroll, { passive: true }); onScroll();
-  totop.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+  // ============================================================
+  // SiteFeatures is NOT persisted: Astro re-renders this overlay DOM on every
+  // navigation, so node references go stale across swaps. To keep ⌘K / '/' /
+  // piano / Konami working WITHOUT stacking handlers, we split into two layers:
+  //
+  //   • GLOBAL key/scroll listeners on window — bound EXACTLY ONCE (guarded).
+  //     They never reference a captured node directly; they read from a mutable
+  //     `R` refs object. This is why pressing ⌘K after N navigations opens
+  //     exactly ONE palette: there is only ever one keydown handler.
+  //   • `bindPage()` — runs on every `astro:page-load`, re-queries the fresh
+  //     overlay nodes into `R`, and (re)binds NODE-level listeners (input,
+  //     item clicks, close buttons, to-top, help-fab) to those new nodes. Those
+  //     listeners die with the old nodes on swap, so they need no manual removal.
+  // ============================================================
 
-  // toast helper
-  const toast = document.getElementById('toast')!;
+  // mutable refs, refreshed each page-load
+  const R: {
+    bar: HTMLElement | null; totop: HTMLElement | null; toast: HTMLElement | null;
+    help: HTMLElement | null; helpFab: HTMLElement | null;
+    cmdk: HTMLElement | null; input: HTMLInputElement | null; items: HTMLElement[];
+  } = { bar: null, totop: null, toast: null, help: null, helpFab: null, cmdk: null, input: null, items: [] };
+
+  let active = 0;
   let toastTimer: number | undefined;
+
   const showToast = (msg: string) => {
-    toast.textContent = msg; toast.classList.add('show');
-    clearTimeout(toastTimer); toastTimer = window.setTimeout(() => toast.classList.remove('show'), 3200);
+    if (!R.toast) return;
+    R.toast.textContent = msg; R.toast.classList.add('show');
+    clearTimeout(toastTimer); toastTimer = window.setTimeout(() => R.toast?.classList.remove('show'), 3200);
   };
 
-  // ---- shortcuts & secrets help overlay ----
-  const help = document.getElementById('help')!;
-  const helpFab = document.getElementById('help-fab')!;
-  const openHelp = () => { help.hidden = false; };
-  const closeHelp = () => { help.hidden = true; };
-  helpFab.addEventListener('click', () => (help.hidden ? openHelp() : closeHelp()));
-  help.querySelectorAll('[data-help-close]').forEach((b) => b.addEventListener('click', closeHelp));
-  addEventListener('keydown', (e) => {
-    const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return;
-    if (e.key === '?') { e.preventDefault(); help.hidden ? openHelp() : closeHelp(); }
-    else if (e.key === 'Escape' && !help.hidden) closeHelp();
-  });
+  // ---- help overlay ----
+  const openHelp = () => { if (R.help) R.help.hidden = false; };
+  const closeHelp = () => { if (R.help) R.help.hidden = true; };
 
   // ---- command palette ----
-  const cmdk = document.getElementById('cmdk')!;
-  const input = document.getElementById('cmdk-input') as HTMLInputElement;
-  const items = Array.from(document.querySelectorAll<HTMLElement>('.cmdk__item'));
-  let active = 0;
-  const visible = () => items.filter((i) => !i.hidden);
+  const visible = () => R.items.filter((i) => !i.hidden);
   const setActive = (n: number) => {
     const vis = visible(); if (!vis.length) return;
     active = (n + vis.length) % vis.length;
-    items.forEach((i) => i.classList.remove('is-active'));
+    R.items.forEach((i) => i.classList.remove('is-active'));
     vis[active].classList.add('is-active');
     vis[active].scrollIntoView({ block: 'nearest' });
   };
-  const openCmd = () => { cmdk.hidden = false; input.value = ''; filter(''); input.focus(); };
-  const closeCmd = () => { cmdk.hidden = true; };
+  const filter = (q: string) => {
+    const s = q.toLowerCase();
+    R.items.forEach((i) => { i.hidden = !!s && !(i.querySelector('.cmdk__label')?.textContent || '').toLowerCase().includes(s); });
+    active = 0; setActive(0);
+  };
+  const openCmd = () => { if (!R.cmdk || !R.input) return; R.cmdk.hidden = false; R.input.value = ''; filter(''); R.input.focus(); };
+  const closeCmd = () => { if (R.cmdk) R.cmdk.hidden = true; };
   const run = (el: HTMLElement) => {
     const href = el.dataset.href, key = el.dataset.key;
     closeCmd();
     if (key === 'email') { navigator.clipboard?.writeText(SITE.email); showToast('Email copied ✓'); }
     else if (key === 'cube') { window.dispatchEvent(new CustomEvent('fx:cube')); }
-    else if (href) { if (href.startsWith('http')) open(href, '_blank'); else location.href = href; }
+    // internal links go through the SPA router for a smooth cross-fade; external open in a tab
+    else if (href) { if (href.startsWith('http')) open(href, '_blank'); else navigate(href); }
   };
-  const filter = (q: string) => {
-    const s = q.toLowerCase();
-    items.forEach((i) => { i.hidden = !!s && !(i.querySelector('.cmdk__label')?.textContent || '').toLowerCase().includes(s); });
-    active = 0; setActive(0);
+
+  // ---- (re)bind the swapped-in overlay nodes + their node-level listeners ----
+  const bindPage = () => {
+    R.bar = document.getElementById('scrollbar');
+    R.totop = document.getElementById('totop');
+    R.toast = document.getElementById('toast');
+    R.help = document.getElementById('help');
+    R.helpFab = document.getElementById('help-fab');
+    R.cmdk = document.getElementById('cmdk');
+    R.input = document.getElementById('cmdk-input') as HTMLInputElement | null;
+    R.items = Array.from(document.querySelectorAll<HTMLElement>('.cmdk__item'));
+
+    R.totop?.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+    R.helpFab?.addEventListener('click', () => (R.help?.hidden ? openHelp() : closeHelp()));
+    R.help?.querySelectorAll('[data-help-close]').forEach((b) => b.addEventListener('click', closeHelp));
+    R.input?.addEventListener('input', () => R.input && filter(R.input.value));
+    R.items.forEach((i) => i.addEventListener('click', () => run(i)));
+    R.cmdk?.querySelectorAll('[data-cmdk-close]').forEach((b) => b.addEventListener('click', closeCmd));
+
+    onScroll(); // refresh scroll progress bar / to-top for the new page
   };
-  input?.addEventListener('input', () => filter(input.value));
-  items.forEach((i) => i.addEventListener('click', () => run(i)));
-  cmdk.querySelectorAll('[data-cmdk-close]').forEach((b) => b.addEventListener('click', closeCmd));
 
-  addEventListener('keydown', (e) => {
-    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); cmdk.hidden ? openCmd() : closeCmd(); return; }
-    if (cmdk.hidden) return;
-    if (e.key === 'Escape') closeCmd();
-    else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
-    else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
-    else if (e.key === 'Enter') { e.preventDefault(); const v = visible(); if (v[active]) run(v[active]); }
-  });
+  // ---- GLOBAL listeners: bound ONCE for the document's lifetime ----
+  const onScroll = () => {
+    const h = document.documentElement.scrollHeight - innerHeight;
+    const p = h > 0 ? scrollY / h : 0;
+    if (R.bar) R.bar.style.width = `${p * 100}%`;
+    R.totop?.classList.toggle('show', scrollY > innerHeight * 0.7);
+  };
 
-  // ---- keyboard nav: press g then h/a/w/l ; '/' opens palette ----
   let gPending = false, gTimer: number | undefined;
-  const NAVMAP: Record<string, string> = {
-    h: '/', a: '/about', w: '/work', l: '/bookshelf',
-  };
-  addEventListener('keydown', (e) => {
-    const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA') return;
-    if (e.key === '/' && cmdk.hidden) { e.preventDefault(); openCmd(); return; }
-    if (e.key === 'g') { gPending = true; clearTimeout(gTimer); gTimer = window.setTimeout(() => (gPending = false), 900); return; }
-    if (gPending && NAVMAP[e.key]) {
-      gPending = false;
-      const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
-      location.href = base + (NAVMAP[e.key] === '/' ? '/' : NAVMAP[e.key]);
-    } else gPending = false;
-  });
-
-  // ---- easter eggs: Konami + typing 'cube' ----
+  const NAVMAP: Record<string, string> = { h: '/', a: '/about', w: '/work', l: '/bookshelf' };
   const konami = ['ArrowUp','ArrowUp','ArrowDown','ArrowDown','ArrowLeft','ArrowRight','ArrowLeft','ArrowRight','b','a'];
   let kIdx = 0, typed = '';
-  addEventListener('keydown', (e) => {
-    kIdx = e.key === konami[kIdx] ? kIdx + 1 : (e.key === konami[0] ? 1 : 0);
-    if (kIdx === konami.length) { kIdx = 0; document.body.animate([{ filter: 'hue-rotate(0)' }, { filter: 'hue-rotate(360deg)' }], { duration: 1400 }); showToast('⚛ unlocked — Andrew solves the 3×3 in 9.42s'); }
-    if (/^[a-z]$/.test(e.key)) { typed = (typed + e.key).slice(-5); if (typed.endsWith('cube')) { typed = ''; window.dispatchEvent(new CustomEvent('fx:cube')); } }
-  });
-
-  // ---- piano: number keys 1–9 play a C-major scale (Andrew's a pianist) ----
   let actx: AudioContext | null = null;
   const scale = [261.63, 293.66, 329.63, 349.23, 392.0, 440.0, 493.88, 523.25, 587.33];
-  addEventListener('keydown', (e) => {
-    const tag = (e.target as HTMLElement)?.tagName;
-    if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return;
-    const n = '123456789'.indexOf(e.key);
-    if (n < 0) return;
-    actx = actx || new (window.AudioContext || (window as any).webkitAudioContext)();
-    const t = actx.currentTime;
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.type = 'triangle'; o.frequency.value = scale[n];
-    const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = scale[n] * 2;
-    const g2 = actx.createGain(); g2.gain.value = 0.04;
-    g.gain.setValueAtTime(0.0001, t);
-    g.gain.exponentialRampToValueAtTime(0.16, t + 0.008);
-    g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
-    o.connect(g).connect(actx.destination);
-    o2.connect(g2).connect(g);
-    o.start(t); o2.start(t); o.stop(t + 0.95); o2.stop(t + 0.95);
-  });
+
+  if (!(window as any).__siteFeaturesGlobals) {
+    (window as any).__siteFeaturesGlobals = true;
+
+    addEventListener('scroll', onScroll, { passive: true });
+
+    // help overlay: '?' toggles, Escape closes
+    addEventListener('keydown', (e) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return;
+      if (e.key === '?') { e.preventDefault(); R.help?.hidden ? openHelp() : closeHelp(); }
+      else if (e.key === 'Escape' && R.help && !R.help.hidden) closeHelp();
+    });
+
+    // command palette
+    addEventListener('keydown', (e) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); R.cmdk?.hidden ? openCmd() : closeCmd(); return; }
+      if (!R.cmdk || R.cmdk.hidden) return;
+      if (e.key === 'Escape') closeCmd();
+      else if (e.key === 'ArrowDown') { e.preventDefault(); setActive(active + 1); }
+      else if (e.key === 'ArrowUp') { e.preventDefault(); setActive(active - 1); }
+      else if (e.key === 'Enter') { e.preventDefault(); const v = visible(); if (v[active]) run(v[active]); }
+    });
+
+    // keyboard nav: 'g' then h/a/w/l ; '/' opens palette
+    addEventListener('keydown', (e) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      if (e.key === '/' && R.cmdk?.hidden) { e.preventDefault(); openCmd(); return; }
+      if (e.key === 'g') { gPending = true; clearTimeout(gTimer); gTimer = window.setTimeout(() => (gPending = false), 900); return; }
+      if (gPending && NAVMAP[e.key]) {
+        gPending = false;
+        const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+        navigate(base + (NAVMAP[e.key] === '/' ? '/' : NAVMAP[e.key]));
+      } else gPending = false;
+    });
+
+    // easter eggs: Konami + typing 'cube'
+    addEventListener('keydown', (e) => {
+      kIdx = e.key === konami[kIdx] ? kIdx + 1 : (e.key === konami[0] ? 1 : 0);
+      if (kIdx === konami.length) { kIdx = 0; document.body.animate([{ filter: 'hue-rotate(0)' }, { filter: 'hue-rotate(360deg)' }], { duration: 1400 }); showToast('⚛ unlocked — Andrew solves the 3×3 in 9.42s'); }
+      if (/^[a-z]$/.test(e.key)) { typed = (typed + e.key).slice(-5); if (typed.endsWith('cube')) { typed = ''; window.dispatchEvent(new CustomEvent('fx:cube')); } }
+    });
+
+    // piano: number keys 1–9 play a C-major scale (Andrew's a pianist)
+    addEventListener('keydown', (e) => {
+      const tag = (e.target as HTMLElement)?.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA' || e.metaKey || e.ctrlKey) return;
+      const n = '123456789'.indexOf(e.key);
+      if (n < 0) return;
+      actx = actx || new (window.AudioContext || (window as any).webkitAudioContext)();
+      const t = actx.currentTime;
+      const o = actx.createOscillator(), g = actx.createGain();
+      o.type = 'triangle'; o.frequency.value = scale[n];
+      const o2 = actx.createOscillator(); o2.type = 'sine'; o2.frequency.value = scale[n] * 2;
+      const g2 = actx.createGain(); g2.gain.value = 0.04;
+      g.gain.setValueAtTime(0.0001, t);
+      g.gain.exponentialRampToValueAtTime(0.16, t + 0.008);
+      g.gain.exponentialRampToValueAtTime(0.0001, t + 0.9);
+      o.connect(g).connect(actx.destination);
+      o2.connect(g2).connect(g);
+      o.start(t); o2.start(t); o.stop(t + 0.95); o2.stop(t + 0.95);
+    });
+  }
+
+  // re-acquire nodes + node-level listeners on first load and after every swap
+  document.addEventListener('astro:page-load', bindPage);
 </script>

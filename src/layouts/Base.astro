@@ -1,5 +1,6 @@
 ---
 import '@/styles/global.css';
+import { ClientRouter } from 'astro:transitions';
 import Nav from '@/components/Nav.astro';
 import Footer from '@/components/Footer.astro';
 import SiteFeatures from '@/components/SiteFeatures.astro';
@@ -38,6 +39,12 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 
+    <!-- SPA-style page transitions. A subtle default cross-fade; Astro disables
+         animations automatically under prefers-reduced-motion. Every client
+         script below re-inits on `astro:page-load` and tears down on
+         `astro:before-swap`, so nothing double-binds or leaks across swaps. -->
+    <ClientRouter />
+
     <!-- Without JS, reveal-on-scroll content must still be visible. -->
     <noscript>
       <style>
@@ -49,10 +56,17 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
   </head>
   <body>
     <a href="#main" class="sr-only">Skip to content</a>
+    <!-- Bare background chrome that Astro reliably persists across navigation
+         (single-element roots) so it never flashes or re-inits. Their driving
+         scripts are window-level singletons that target these same persisted
+         nodes. Component chrome (Nav/Footer/SiteFeatures/CubeFx) is NOT
+         persisted — Astro doesn't persist multi-root/scripted components
+         cleanly — so those re-render on swap and re-bind to fresh nodes on
+         astro:page-load instead. -->
     <!-- scroll-driven ambient mood wash (behind everything; pointer-events:none) -->
-    <div class="mood-layer" aria-hidden="true"></div>
-    <BorderArtifacts />
-    <div class="cursor" id="cursor" aria-hidden="true"></div>
+    <div class="mood-layer" aria-hidden="true" transition:persist="mood-layer"></div>
+    <div transition:persist="border-artifacts"><BorderArtifacts /></div>
+    <div class="cursor" id="cursor" aria-hidden="true" transition:persist="cursor"></div>
     <Nav />
     <main id="main">
       <slot />
@@ -76,145 +90,178 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
 
     <script>
       // ============================================================
-      // Scroll reveal — cinematic vocabulary
-      // The IO just toggles `.in`; all motion is CSS (off the main
-      // thread, so it never janks the three.js render loop). Default
-      // `data-reveal` = rise+blur; opt-in variants via the attribute
-      // value: "wipe" (mask), "stagger" (word cascade), "blur", "rise".
+      // Base chrome scripts — transition-aware (Astro ClientRouter).
+      //
+      // Two scopes:
+      //   • PER-PAGE  (reveal IO + word/wipe DOM prep): the swapped-in <main>
+      //     brings fresh [data-reveal] nodes, so this re-runs on every
+      //     `astro:page-load` and the previous observer disconnects on
+      //     `astro:before-swap` — no orphaned observers, no double `.in`.
+      //   • SINGLETON (mood rAF + cursor): these bind window/document listeners
+      //     and animate persisted chrome. They must run exactly ONCE for the
+      //     life of the document — guarded by a flag — so navigations never
+      //     stack a second scroll listener or a second rAF loop.
       // ============================================================
       const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
-      // ---- per-variant DOM prep (skipped entirely under reduced-motion) ----
-      if (!reduceMotion) {
-        // WIPE: wrap the element's existing children in a single inner block
-        // that we slide up from behind the clipped (overflow:hidden) host.
-        document.querySelectorAll('[data-reveal="wipe"]').forEach((host) => {
-          if (host.querySelector(':scope > .reveal-wipe__inner')) return; // idempotent
-          const inner = document.createElement('span');
-          inner.className = 'reveal-wipe__inner';
-          while (host.firstChild) inner.appendChild(host.firstChild);
-          host.appendChild(inner);
-        });
+      // ---------------- PER-PAGE: scroll reveal ----------------
+      // The IO just toggles `.in`; all motion is CSS (off the main thread, so it
+      // never janks the three.js render loop). Default `data-reveal` = rise+blur;
+      // opt-in variants via the attribute value: "wipe" / "stagger" / "blur".
+      let revealIO: IntersectionObserver | null = null;
 
-        // STAGGER: split visible text into word spans, preserving inline
-        // markup (<br>, <em>, links, etc.). We only ever wrap TEXT nodes, so
-        // headings using <br/> or set:html keep their structure intact.
-        let wordCounter = 0;
-        const splitTextNode = (node: Text) => {
-          const text = node.nodeValue ?? '';
-          if (!text.trim()) return; // pure whitespace — leave as-is
-          const frag = document.createDocumentFragment();
-          // keep leading/trailing/internal spaces as their own inline spans so
-          // spacing survives inline-block word boxes.
-          const parts = text.split(/(\s+)/);
-          for (const part of parts) {
-            if (part === '') continue;
-            if (/^\s+$/.test(part)) {
-              const sp = document.createElement('span');
-              sp.className = 'reveal-word__sp';
-              sp.textContent = part;
-              frag.appendChild(sp);
+      const setupReveal = () => {
+        // disconnect any observer left over from the previous page first
+        revealIO?.disconnect();
+
+        // ---- per-variant DOM prep (skipped entirely under reduced-motion) ----
+        if (!reduceMotion) {
+          // WIPE: wrap the element's existing children in a single inner block
+          // that we slide up from behind the clipped (overflow:hidden) host.
+          document.querySelectorAll('[data-reveal="wipe"]').forEach((host) => {
+            if (host.querySelector(':scope > .reveal-wipe__inner')) return; // idempotent
+            const inner = document.createElement('span');
+            inner.className = 'reveal-wipe__inner';
+            while (host.firstChild) inner.appendChild(host.firstChild);
+            host.appendChild(inner);
+          });
+
+          // STAGGER: split visible text into word spans, preserving inline
+          // markup (<br>, <em>, links, etc.). We only ever wrap TEXT nodes, so
+          // headings using <br/> or set:html keep their structure intact.
+          let wordCounter = 0;
+          const splitTextNode = (node: Text) => {
+            const text = node.nodeValue ?? '';
+            if (!text.trim()) return; // pure whitespace — leave as-is
+            const frag = document.createDocumentFragment();
+            // keep leading/trailing/internal spaces as their own inline spans so
+            // spacing survives inline-block word boxes.
+            const parts = text.split(/(\s+)/);
+            for (const part of parts) {
+              if (part === '') continue;
+              if (/^\s+$/.test(part)) {
+                const sp = document.createElement('span');
+                sp.className = 'reveal-word__sp';
+                sp.textContent = part;
+                frag.appendChild(sp);
+              } else {
+                const w = document.createElement('span');
+                w.className = 'reveal-word';
+                w.style.setProperty('--word-i', String(wordCounter++));
+                w.textContent = part;
+                frag.appendChild(w);
+              }
+            }
+            node.replaceWith(frag);
+          };
+          const walkAndSplit = (el: Element) => {
+            // snapshot child nodes first (we mutate during iteration)
+            for (const child of Array.from(el.childNodes)) {
+              if (child.nodeType === Node.TEXT_NODE) {
+                splitTextNode(child as Text);
+              } else if (
+                child.nodeType === Node.ELEMENT_NODE &&
+                (child as Element).tagName !== 'BR'
+              ) {
+                walkAndSplit(child as Element); // recurse into <em>, <a>, spans…
+              }
+            }
+          };
+          document.querySelectorAll('[data-reveal="stagger"]').forEach((host) => {
+            if (host.querySelector('.reveal-word')) return; // idempotent
+            wordCounter = 0; // restart cascade per heading
+            walkAndSplit(host);
+          });
+        }
+
+        // ---- the observer (adds `.in`, then unobserves) ----
+        const io = new IntersectionObserver(
+          (entries) => {
+            for (const e of entries) {
+              if (e.isIntersecting) {
+                (e.target as HTMLElement).classList.add('in');
+                io.unobserve(e.target);
+              }
+            }
+          },
+          { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
+        );
+        revealIO = io;
+        const items = document.querySelectorAll('[data-reveal]');
+        items.forEach((el, i) => {
+          // honor data-reveal-delay; otherwise a gentle source-order cascade.
+          const delay = (el as HTMLElement).dataset.revealDelay ?? String((i % 6) * 70);
+          // feed the CSS custom property the transitions key off of.
+          (el as HTMLElement).style.setProperty('--reveal-delay', `${delay}ms`);
+          io.observe(el);
+        });
+      };
+
+      // re-run on every navigation (fires on first load too); tear down before swap
+      document.addEventListener('astro:page-load', setupReveal);
+      document.addEventListener('astro:before-swap', () => revealIO?.disconnect());
+
+      // ---------------- SINGLETON: mood rAF + cursor ----------------
+      // Persisted chrome (#cursor, .mood-layer) survives swaps, so these must
+      // initialise exactly once. The flag survives because this module's
+      // top-level body runs only on the first full load (Astro does not
+      // re-execute inline module scripts after a swap).
+      if (!(window as any).__baseChromeInit) {
+        (window as any).__baseChromeInit = true;
+
+        // ---- scroll-driven mood: write an eased --scroll-progress (0→1) ----
+        // One passive listener + a single rAF that only runs while catching up,
+        // lerped for buttery glide. No per-frame allocation. Skipped (held at a
+        // static value by CSS) under reduced-motion.
+        if (!reduceMotion) {
+          const root = document.documentElement;
+          let target = 0;
+          let current = 0;
+          let raf = 0;
+          const measure = () => {
+            const max = document.documentElement.scrollHeight - innerHeight;
+            target = max > 0 ? Math.min(Math.max(scrollY / max, 0), 1) : 0;
+          };
+          const tick = () => {
+            current += (target - current) * 0.08; // ease toward target
+            root.style.setProperty('--scroll-progress', current.toFixed(4));
+            if (Math.abs(target - current) > 0.0005) {
+              raf = requestAnimationFrame(tick);
             } else {
-              const w = document.createElement('span');
-              w.className = 'reveal-word';
-              w.style.setProperty('--word-i', String(wordCounter++));
-              w.textContent = part;
-              frag.appendChild(w);
+              root.style.setProperty('--scroll-progress', target.toFixed(4));
+              raf = 0;
             }
-          }
-          node.replaceWith(frag);
-        };
-        const walkAndSplit = (el: Element) => {
-          // snapshot child nodes first (we mutate during iteration)
-          for (const child of Array.from(el.childNodes)) {
-            if (child.nodeType === Node.TEXT_NODE) {
-              splitTextNode(child as Text);
-            } else if (
-              child.nodeType === Node.ELEMENT_NODE &&
-              (child as Element).tagName !== 'BR'
-            ) {
-              walkAndSplit(child as Element); // recurse into <em>, <a>, spans…
-            }
-          }
-        };
-        document.querySelectorAll('[data-reveal="stagger"]').forEach((host) => {
-          if (host.querySelector('.reveal-word')) return; // idempotent
-          wordCounter = 0; // restart cascade per heading
-          walkAndSplit(host);
-        });
-      }
+          };
+          const kick = () => {
+            measure();
+            if (!raf) raf = requestAnimationFrame(tick);
+          };
+          addEventListener('scroll', kick, { passive: true });
+          addEventListener('resize', kick, { passive: true });
+          // re-measure after each swap (new page = new scrollHeight), and reset
+          // scroll-driven progress to the top the new page lands at.
+          document.addEventListener('astro:page-load', kick);
+        }
 
-      // ---- the observer (unchanged contract: adds `.in`, then unobserves) ----
-      const io = new IntersectionObserver(
-        (entries) => {
-          for (const e of entries) {
-            if (e.isIntersecting) {
-              (e.target as HTMLElement).classList.add('in');
-              io.unobserve(e.target);
-            }
-          }
-        },
-        { threshold: 0.12, rootMargin: '0px 0px -8% 0px' },
-      );
-      const items = document.querySelectorAll('[data-reveal]');
-      items.forEach((el, i) => {
-        // honor data-reveal-delay; otherwise a gentle source-order cascade.
-        const delay = (el as HTMLElement).dataset.revealDelay ?? String((i % 6) * 70);
-        // feed the CSS custom property the transitions key off of.
-        (el as HTMLElement).style.setProperty('--reveal-delay', `${delay}ms`);
-        io.observe(el);
-      });
-
-      // ---- scroll-driven mood: write an eased --scroll-progress (0→1) ----
-      // One passive listener + a single rAF that only runs while catching up,
-      // lerped for buttery glide. No per-frame allocation. Skipped (held at a
-      // static value by CSS) under reduced-motion.
-      if (!reduceMotion) {
-        const root = document.documentElement;
-        let target = 0;
-        let current = 0;
-        let raf = 0;
-        const measure = () => {
-          const max = document.documentElement.scrollHeight - innerHeight;
-          target = max > 0 ? Math.min(Math.max(scrollY / max, 0), 1) : 0;
-        };
-        const tick = () => {
-          current += (target - current) * 0.08; // ease toward target
-          root.style.setProperty('--scroll-progress', current.toFixed(4));
-          if (Math.abs(target - current) > 0.0005) {
-            raf = requestAnimationFrame(tick);
-          } else {
-            root.style.setProperty('--scroll-progress', target.toFixed(4));
-            raf = 0;
-          }
-        };
-        const kick = () => {
-          measure();
-          if (!raf) raf = requestAnimationFrame(tick);
-        };
-        addEventListener('scroll', kick, { passive: true });
-        addEventListener('resize', kick, { passive: true });
-        kick();
-      }
-
-      // ---- custom cursor (pointer devices only) ----
-      const cursor = document.getElementById('cursor');
-      if (cursor && window.matchMedia('(hover: hover)').matches) {
-        let x = innerWidth / 2, y = innerHeight / 2, cx = x, cy = y;
-        addEventListener('pointermove', (e) => {
-          x = e.clientX; y = e.clientY; cursor.style.opacity = '1';
-          const hot = (e.target as HTMLElement)?.closest('a, button, [data-hot]');
-          cursor.classList.toggle('hot', !!hot);
-        });
-        addEventListener('pointerdown', () => cursor.classList.add('down'));
-        addEventListener('pointerup', () => cursor.classList.remove('down'));
-        addEventListener('pointerleave', () => (cursor.style.opacity = '0'));
-        const loop = () => {
-          cx += (x - cx) * 0.18; cy += (y - cy) * 0.18;
-          cursor.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%)`;
-          requestAnimationFrame(loop);
-        };
-        loop();
+        // ---- custom cursor (pointer devices only) ----
+        const cursor = document.getElementById('cursor');
+        if (cursor && window.matchMedia('(hover: hover)').matches) {
+          let x = innerWidth / 2, y = innerHeight / 2, cx = x, cy = y;
+          addEventListener('pointermove', (e) => {
+            x = e.clientX; y = e.clientY; cursor.style.opacity = '1';
+            const hot = (e.target as HTMLElement)?.closest('a, button, [data-hot]');
+            cursor.classList.toggle('hot', !!hot);
+          });
+          addEventListener('pointerdown', () => cursor.classList.add('down'));
+          addEventListener('pointerup', () => cursor.classList.remove('down'));
+          addEventListener('pointerleave', () => (cursor.style.opacity = '0'));
+          const loop = () => {
+            cx += (x - cx) * 0.18; cy += (y - cy) * 0.18;
+            cursor.style.transform = `translate(${cx}px, ${cy}px) translate(-50%, -50%)`;
+            requestAnimationFrame(loop);
+          };
+          loop();
+        }
       }
     </script>
   </body>

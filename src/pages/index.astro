@@ -169,13 +169,20 @@ try {
   import { mount } from '@/lib/three/core';
   import { heroField } from '@/lib/three/HeroField';
 
-  mount('#hero-field', (h) => heroField(h), {
-    // Controlled glow only — the additive particle field is bright on its own, so
-    // keep bloom gentle + threshold high to avoid blowing the molecule to white.
-    bloom: { strength: 0.4, radius: 0.55, threshold: 0.5 },
-    alpha: true,
-    maxPixelRatio: 2,
-  });
+  // `mount()` registers its own `astro:before-swap` teardown (destroys the GPGPU
+  // + removes the canvas) AND guards against double-mount via host.dataset.mounted.
+  // So we (re)mount on every `astro:page-load`: idempotent on first paint, and it
+  // re-creates the hero when the user navigates home → away → home. No persist
+  // here — persisting a mount()-owned host would leave a destroyed, blank canvas.
+  const mountHero = () =>
+    mount('#hero-field', (h) => heroField(h), {
+      // Controlled glow only — the additive particle field is bright on its own, so
+      // keep bloom gentle + threshold high to avoid blowing the molecule to white.
+      bloom: { strength: 0.4, radius: 0.55, threshold: 0.5 },
+      alpha: true,
+      maxPixelRatio: 2,
+    });
+  document.addEventListener('astro:page-load', mountHero);
 </script>
 
 <style>

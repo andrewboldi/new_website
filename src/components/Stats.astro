@@ -34,25 +34,39 @@ const stats = [
 </style>
 
 <script>
-  const nums = document.querySelectorAll<HTMLElement>('.stat__num');
-  const io = new IntersectionObserver((entries) => {
-    for (const e of entries) {
-      if (!e.isIntersecting) continue;
-      const el = e.target as HTMLElement;
-      io.unobserve(el);
-      const target = parseFloat(el.dataset.target || '0');
-      const dec = parseInt(el.dataset.dec || '0', 10);
-      const suffix = el.dataset.suffix || '';
-      const dur = 1400;
-      const start = performance.now();
-      const tick = (now: number) => {
-        const t = Math.min(1, (now - start) / dur);
-        const eased = 1 - Math.pow(1 - t, 3);
-        el.textContent = (target * eased).toFixed(dec) + suffix;
-        if (t < 1) requestAnimationFrame(tick); else el.textContent = target.toFixed(dec) + suffix;
-      };
-      requestAnimationFrame(tick);
-    }
-  }, { threshold: 0.4 });
-  nums.forEach((n) => io.observe(n));
+  // Stats lives inside <main>, so it is swapped (not persisted) on navigation:
+  // re-init the count-up observer on every `astro:page-load` against the fresh
+  // nodes, and disconnect the previous observer on `astro:before-swap` so we
+  // never leak an observer or a count-up rAF when leaving the page.
+  let statsIO: IntersectionObserver | null = null;
+
+  const initStats = () => {
+    statsIO?.disconnect();
+    const nums = document.querySelectorAll<HTMLElement>('.stat__num');
+    if (!nums.length) return;
+    const io = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        const el = e.target as HTMLElement;
+        io.unobserve(el);
+        const target = parseFloat(el.dataset.target || '0');
+        const dec = parseInt(el.dataset.dec || '0', 10);
+        const suffix = el.dataset.suffix || '';
+        const dur = 1400;
+        const start = performance.now();
+        const tick = (now: number) => {
+          const t = Math.min(1, (now - start) / dur);
+          const eased = 1 - Math.pow(1 - t, 3);
+          el.textContent = (target * eased).toFixed(dec) + suffix;
+          if (t < 1) requestAnimationFrame(tick); else el.textContent = target.toFixed(dec) + suffix;
+        };
+        requestAnimationFrame(tick);
+      }
+    }, { threshold: 0.4 });
+    statsIO = io;
+    nums.forEach((n) => io.observe(n));
+  };
+
+  document.addEventListener('astro:page-load', initStats);
+  document.addEventListener('astro:before-swap', () => statsIO?.disconnect());
 </script>

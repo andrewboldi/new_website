@@ -202,9 +202,28 @@ export function startWorkHScroll(root: ParentNode = document): HScrollController
   measure();
   wake();
 
+  // SPA-nav fix: when this controller is (re)created on `astro:page-load` after
+  // a client-side navigation, the swapped-in layout may not have fully settled
+  // at init time, so the first measure() reads a not-yet-tall section (no pin /
+  // no glide). Web fonts are usually ALREADY cached on a soft nav, so
+  // `fonts.ready` resolves immediately and can't save us. Re-measure on the next
+  // two animation frames (after the browser has done a real layout pass) so the
+  // pinned scroll geometry is correct whether the page was hard-loaded or
+  // reached via the SPA router. rAF ids are tracked so destroy() cancels them.
+  let settleRAF1 = 0;
+  let settleRAF2 = 0;
+  settleRAF1 = requestAnimationFrame(() => {
+    settleRAF2 = requestAnimationFrame(() => {
+      measure();
+      wake();
+    });
+  });
+
   return {
     destroy() {
       cancelAnimationFrame(raf);
+      cancelAnimationFrame(settleRAF1);
+      cancelAnimationFrame(settleRAF2);
       window.removeEventListener('scroll', onScroll);
       window.removeEventListener('resize', onResize);
       el.section.removeEventListener('work:filter', onFilter as EventListener);

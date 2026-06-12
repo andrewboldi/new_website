@@ -23,32 +23,42 @@
   import { ambientField } from '@/lib/three/AmbientField';
   import * as THREE from 'three';
 
-  // Deep atmospheric layer behind the molecules. No bloom (it's a self-lit
-  // gradient — bloom would raise exposure / risk blowout); cheap fixed-cost fBm,
-  // so pixelRatio is capped low and it stays mobile-trivial. Reduced-motion is
-  // honoured inside the module (uTime frozen) + core renders one static frame.
-  const mobile = matchMedia('(max-width: 760px)').matches;
-  mount('#ambient-field', (h) => ambientField(h), {
-    bloom: false,
-    alpha: true,
-    maxPixelRatio: mobile ? 1.0 : 1.3,
-  });
+  // Background WebGL fields. `mount()` registers its own `astro:before-swap`
+  // teardown (disposes the scene + removes the canvas) and guards re-entry via
+  // host.dataset.mounted, so we (re)mount on every `astro:page-load`: idempotent
+  // on first paint, and re-created whenever the user lands on a page that
+  // includes this background (home/work). We deliberately do NOT persist these
+  // hosts — a persisted mount()-owned host would be destroyed on swap and left
+  // as a blank, dead canvas. Re-mount keeps them genuinely alive + leak-free.
+  const mountFields = () => {
+    // Deep atmospheric layer behind the molecules. No bloom (it's a self-lit
+    // gradient — bloom would raise exposure / risk blowout); cheap fixed-cost fBm,
+    // so pixelRatio is capped low and it stays mobile-trivial. Reduced-motion is
+    // honoured inside the module (uTime frozen) + core renders one static frame.
+    const mobile = matchMedia('(max-width: 760px)').matches;
+    mount('#ambient-field', (h) => ambientField(h), {
+      bloom: false,
+      alpha: true,
+      maxPixelRatio: mobile ? 1.0 : 1.3,
+    });
 
-  const tag = document.getElementById('field-tag');
-  const label = document.getElementById('field-tag-label');
-  const dot = tag?.querySelector('.field-tag__dot') as HTMLElement | null;
+    const tag = document.getElementById('field-tag');
+    const label = document.getElementById('field-tag-label');
+    const dot = tag?.querySelector('.field-tag__dot') as HTMLElement | null;
 
-  mount('#bg-field', (h) =>
-    morphField(h, {
-      onStage: (_i, text, accent) => {
-        if (label) label.textContent = text;
-        if (dot) {
-          const c = '#' + new THREE.Color(accent).getHexString();
-          dot.style.background = c;
-          dot.style.boxShadow = `0 0 12px ${c}`;
-        }
-      },
-    }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.3 });
+    mount('#bg-field', (h) =>
+      morphField(h, {
+        onStage: (_i, text, accent) => {
+          if (label) label.textContent = text;
+          if (dot) {
+            const c = '#' + new THREE.Color(accent).getHexString();
+            dot.style.background = c;
+            dot.style.boxShadow = `0 0 12px ${c}`;
+          }
+        },
+      }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.3 });
+  };
+  document.addEventListener('astro:page-load', mountFields);
 </script>
 
 <style>

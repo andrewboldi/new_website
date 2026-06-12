@@ -87,8 +87,18 @@ const ghProfile = 'https://github.com/andrewboldi';
 </style>
 
 <script>
-  const root = document.getElementById('binclock');
-  if (root) {
+  // The footer is re-rendered on every navigation (not persisted), so we rebuild
+  // the binclock against the fresh #binclock node on each `astro:page-load` and
+  // clear the previous setInterval on `astro:before-swap`. This guarantees the
+  // clock always shows (no empty grid after a swap) AND that we never leak a
+  // second interval ticking a detached DOM node.
+  let binTimer: number | undefined;
+
+  const buildBinclock = () => {
+    clearInterval(binTimer);
+    const root = document.getElementById('binclock');
+    if (!root) return;
+    root.replaceChildren(); // start clean (idempotent if a prior build ran)
     const heights = [2, 4, 3, 4, 3, 4]; // bits per BCD column: H10 H1 M10 M1 S10 S1
     const dots: HTMLElement[][] = heights.map((h) => {
       const col = document.createElement('div'); col.className = 'binclock__col';
@@ -101,8 +111,12 @@ const ghProfile = 'https://github.com/andrewboldi';
       const digits = [Math.floor(n.getHours() / 10), n.getHours() % 10, Math.floor(n.getMinutes() / 10), n.getMinutes() % 10, Math.floor(n.getSeconds() / 10), n.getSeconds() % 10];
       digits.forEach((val, c) => dots[c].forEach((d, b) => d.classList.toggle('on', !!((val >> b) & 1))));
     };
-    tick(); setInterval(tick, 1000);
-  }
+    tick();
+    binTimer = window.setInterval(tick, 1000);
+  };
+
+  document.addEventListener('astro:page-load', buildBinclock);
+  document.addEventListener('astro:before-swap', () => clearInterval(binTimer));
 </script>
 
 

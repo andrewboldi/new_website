@@ -19,21 +19,47 @@
 
 <script>
   import { mount } from '@/lib/three/core';
+
+  // CubeFx is re-rendered on navigation (not persisted), so its overlay nodes go
+  // stale across swaps. We bind the `fx:cube` trigger ONCE (guarded) so it never
+  // stacks, but it reads the wrap/host from a mutable `refs` object that we
+  // refresh on every `astro:page-load`. `mount()` also registers its own
+  // `astro:before-swap` teardown, so a cube on-screen during a swap is destroyed
+  // mid-show — we sync our local handle + the host's mounted flag on before-swap
+  // so the egg re-triggers cleanly on the next page.
   let handle: any = null, hideTimer: number | undefined;
-  const wrap = document.getElementById('cubefx');
-  const host = document.getElementById('cubefx-host');
-  addEventListener('fx:cube', async () => {
-    if (!wrap || !host) return;
-    wrap.hidden = false;
-    requestAnimationFrame(() => wrap.classList.add('show'));
-    if (!handle) {
-      const { rubiksCube } = await import('@/lib/three/RubiksCube');
-      handle = mount(host, (h) => rubiksCube(h), { alpha: true, cameraZ: 8 });
-    }
+  const refs: { wrap: HTMLElement | null; host: HTMLElement | null } = { wrap: null, host: null };
+
+  const teardown = () => {
     clearTimeout(hideTimer);
-    hideTimer = window.setTimeout(() => {
-      wrap.classList.remove('show');
-      setTimeout(() => { wrap.hidden = true; handle?.destroy(); handle = null; host.dataset.mounted = ''; }, 520);
-    }, 7000);
+    handle?.destroy();
+    handle = null;
+    if (refs.host) refs.host.dataset.mounted = '';
+    if (refs.wrap) { refs.wrap.classList.remove('show'); refs.wrap.hidden = true; }
+  };
+
+  document.addEventListener('astro:page-load', () => {
+    refs.wrap = document.getElementById('cubefx');
+    refs.host = document.getElementById('cubefx-host');
   });
+  document.addEventListener('astro:before-swap', teardown);
+
+  if (!(window as any).__cubeFxInit) {
+    (window as any).__cubeFxInit = true;
+    addEventListener('fx:cube', async () => {
+      const { wrap, host } = refs;
+      if (!wrap || !host) return;
+      wrap.hidden = false;
+      requestAnimationFrame(() => wrap.classList.add('show'));
+      if (!handle) {
+        const { rubiksCube } = await import('@/lib/three/RubiksCube');
+        handle = mount(host, (h) => rubiksCube(h), { alpha: true, cameraZ: 8 });
+      }
+      clearTimeout(hideTimer);
+      hideTimer = window.setTimeout(() => {
+        wrap.classList.remove('show');
+        setTimeout(() => { wrap.hidden = true; handle?.destroy(); handle = null; host.dataset.mounted = ''; }, 520);
+      }, 7000);
+    });
+  }
 </script>

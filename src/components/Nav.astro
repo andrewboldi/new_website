@@ -93,17 +93,40 @@ function active(path: string) {
 </style>
 
 <script>
-  const nav = document.getElementById('site-nav');
-  const onScroll = () => nav?.classList.toggle('scrolled', window.scrollY > 24);
-  onScroll();
-  window.addEventListener('scroll', onScroll, { passive: true });
+  // The nav is `transition:persist`ed, so this DOM node (and the listeners we
+  // bind below) survive every client-side navigation — bind ONCE, guarded, so
+  // the scroll/toggle handlers never stack. Only the active-link highlight is
+  // page-dependent, so we recompute that on each `astro:page-load`.
+  if (!(window as any).__siteNavInit) {
+    (window as any).__siteNavInit = true;
+    const nav = document.getElementById('site-nav');
+    const onScroll = () => nav?.classList.toggle('scrolled', window.scrollY > 24);
+    onScroll();
+    window.addEventListener('scroll', onScroll, { passive: true });
 
-  const toggle = document.getElementById('nav-toggle');
-  toggle?.addEventListener('click', () => {
-    const open = nav?.classList.toggle('open');
-    toggle.setAttribute('aria-expanded', String(!!open));
-  });
-  nav?.querySelectorAll('.nav__link').forEach((a) =>
-    a.addEventListener('click', () => nav.classList.remove('open')),
-  );
+    const toggle = document.getElementById('nav-toggle');
+    toggle?.addEventListener('click', () => {
+      const open = nav?.classList.toggle('open');
+      toggle.setAttribute('aria-expanded', String(!!open));
+    });
+    nav?.querySelectorAll('.nav__link').forEach((a) =>
+      a.addEventListener('click', () => nav.classList.remove('open')),
+    );
+
+    // keep the active link in sync with the current URL across SPA navigations
+    const base = (import.meta.env.BASE_URL || '/').replace(/\/$/, '');
+    const syncActive = () => {
+      const here = location.pathname.replace(/\/$/, '') || '/';
+      nav?.querySelectorAll<HTMLAnchorElement>('.nav__link').forEach((a) => {
+        const target = new URL(a.href).pathname.replace(/\/$/, '') || '/';
+        const isHome = target === (base || '/') || target === base;
+        const on = isHome
+          ? here === (base || '/') || here === base
+          : here.startsWith(target);
+        a.classList.toggle('is-active', on);
+      });
+      onScroll(); // also refresh scrolled state for the page we land on
+    };
+    document.addEventListener('astro:page-load', syncActive);
+  }
 </script>
