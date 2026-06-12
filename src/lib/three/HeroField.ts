@@ -466,6 +466,28 @@ export function heroField(handle: SceneHandle) {
 
   let progress = reduced ? 1 : 0;
 
+  /* --------------------- active-scroll compute pause -------------------- */
+  // The hero host is `position: fixed; inset: 0`, so it NEVER leaves the viewport
+  // — the core hard-freeze can't idle it while you read the homepage. But the
+  // costly GPGPU curl-noise sim is exactly what we DON'T want fighting the browser
+  // during the layout/paint storm of an active scroll (Andrew's #1 rule: buttery
+  // scroll). So while the user is actively scrolling we SKIP gpu.compute() and
+  // only keep applying the cheap eased uProgress morph (the molecule still forms/
+  // disperses on scroll — that's the visible response). The curl swirl simply
+  // holds its last position texture for those few frames, then resumes the moment
+  // scrolling settles (~120ms after the last scroll event). The swirl is slow and
+  // organic, so a brief pause is invisible — no pop. Off-frames still accumulate
+  // delta (capped) so the sim doesn't slow-mo or jump when it resumes.
+  let scrolling = false;
+  let scrollTimer = 0;
+  const SCROLL_IDLE_MS = 120;
+  const onScroll = () => {
+    scrolling = true;
+    if (scrollTimer) clearTimeout(scrollTimer);
+    scrollTimer = window.setTimeout(() => { scrolling = false; }, SCROLL_IDLE_MS);
+  };
+  if (!reduced) window.addEventListener('scroll', onScroll, { passive: true });
+
   /* --------------------- adaptive quality (governor) -------------------- */
   // The hero always renders at full rate, so it carries a steady GPU cost. When
   // the global governor reports the page is GPU-bound it calls onQuality(q) with
@@ -489,6 +511,7 @@ export function heroField(handle: SceneHandle) {
   let activeFrac = 1;          // current eased fraction
   let computeStride = 2;       // 2 = ~30fps sim (default), 3 = ~20fps under load
   let computeAccum = 0;        // frames since last compute (throttle counter)
+  let computeCount = 0;        // total gpu.compute() calls (DEV proof of pause)
 
   // Only the GPGPU path adapts the draw range (the CPU fallback is already a tiny
   // sparse cloud — thinning it would just look sparse). Reduced motion is a static
@@ -506,6 +529,15 @@ export function heroField(handle: SceneHandle) {
   // same applyQuality path the real governor uses.
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     (window as any).__HERO_FORCE_QUALITY__ = (q: number) => applyQuality(q);
+    // Force the active-scroll flag on/off WITHOUT real scroll events, so a test can
+    // prove the compute-pause deterministically (frame-rate-independent): pin
+    // scrolling=true and computeCount must stay FLAT across many frames; pin false
+    // and it must climb. Passing null returns control to the real scroll listener.
+    (window as any).__HERO_FORCE_SCROLLING__ = (v: boolean | null) => {
+      if (v === null) { scrolling = false; return; }
+      if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = 0; }
+      scrolling = v;
+    };
     (window as any).__HERO_ADAPT__ = () => ({
       path: usedGPGPU ? `gpgpu-${WIDTH}` : `cpu-${RENDER_W}`,
       renderCount: RENDER_COUNT,
@@ -513,6 +545,8 @@ export function heroField(handle: SceneHandle) {
       drawCount: (geo.drawRange.count === Infinity ? RENDER_COUNT : geo.drawRange.count),
       uSize: renderMat.uniforms.uSize?.value,
       uAlpha: renderMat.uniforms.uAlpha?.value,
+      scrolling,           // true while actively scrolling (compute paused)
+      computeCount,        // total gpu.compute() calls — flat while scroll-paused
     });
   }
 
@@ -538,6 +572,9 @@ export function heroField(handle: SceneHandle) {
     const breathe = progress < 0.02 ? (Math.sin(t * 0.5) * 0.5 + 0.5) * 0.06 : 0;
     const formProgress = Math.min(1, progress + breathe);
 
+    // canvas fade (also gates the compute-pause: an invisible hero need not sim)
+    const canvasOpacity = heroOpacity();
+
     if (usedGPGPU && gpu) {
       // ease the active particle fraction toward the governor target (no popping)
       activeFrac += (targetFrac - activeFrac) * Math.min(1, delta * 3);
@@ -558,7 +595,14 @@ export function heroField(handle: SceneHandle) {
       // scroll stay buttery-smooth even though the underlying sim advances slower.
       const simInterval = computeStride >= 3 ? 1 / 20 : 1 / 30;
       computeAccum += delta;
-      const doCompute = computeAccum >= simInterval;
+      // PAUSE the expensive curl-noise sim while the user is actively scrolling
+      // (decouple it from the busy scroll frames) OR once the hero has fully faded
+      // out below the fold (canvasOpacity ~0 → nothing to compute for). The cheap
+      // eased uProgress morph below still runs, so the molecule keeps responding to
+      // scroll. computeAccum keeps growing (capped at simInterval when consumed) so
+      // the swirl resumes at the right phase with no slow-mo and no jump.
+      const computePaused = scrolling || canvasOpacity <= 0.001;
+      const doCompute = !computePaused && computeAccum >= simInterval;
       if (doCompute) {
         // Sim delta capped at simInterval (velocity shader's stable max with its
         // damping + speed clamp) so a throttled step never blows up after a stall.
@@ -567,7 +611,12 @@ export function heroField(handle: SceneHandle) {
         velocityVariable.material.uniforms.uDelta.value = simDelta;
         positionVariable.material.uniforms.uDelta.value = simDelta;
         gpu.compute();
+        computeCount++;
         computeAccum = 0;
+      } else if (computeAccum > simInterval) {
+        // While paused, don't let accumulated delta balloon — cap it so the first
+        // resumed step advances by one stable interval, not the whole pause span.
+        computeAccum = simInterval;
       }
       renderMat.uniforms.texturePosition.value = gpu.getCurrentRenderTarget(positionVariable).texture;
       renderMat.uniforms.uProgress.value = formProgress;
@@ -581,10 +630,12 @@ export function heroField(handle: SceneHandle) {
     group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, ctx.pointer.y * 0.12 - formProgress * 0.1, 0.04);
 
     // fade the fixed canvas out as the hero leaves (avoids overlaying lower sections)
-    canvas.style.opacity = heroOpacity().toFixed(3);
+    canvas.style.opacity = canvasOpacity.toFixed(3);
   });
 
   onDispose(() => {
+    if (scrollTimer) clearTimeout(scrollTimer);
+    window.removeEventListener('scroll', onScroll);
     geo.dispose();
     renderMat.dispose();
     targetTex?.dispose();

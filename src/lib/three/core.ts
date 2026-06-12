@@ -195,6 +195,16 @@ interface SchedTask {
   priority: () => number;
   /** true while on-screen and not reduced-motion-frozen. */
   active: () => boolean;
+  /**
+   * HARD FREEZE: true while the scene is intersecting the viewport (even a sliver).
+   * When false the scheduler skips the task ENTIRELY — no frame callbacks, no
+   * simulation, no render — so an off-screen scene costs ~0 (this is what takes a
+   * 10-canvas page down to the 1–2 scenes actually on screen). The task's own
+   * `step` advances its clock by a capped dt on the first frame back so the
+   * animation resumes where it left off instead of jumping forward by the whole
+   * time it spent off-screen.
+   */
+  onScreen: () => boolean;
   /** stride bucket for throttled scenes (filled by the scheduler each frame). */
   _stride: number;
   _phase: number;
@@ -222,16 +232,18 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     // rate) vs throttled. Proves the scheduler caps full-rate work regardless of
     // how many scenes are visible.
     const strides: Record<number, number> = {};
-    let active = 0;
+    let active = 0; // on-screen AND ticking (the only scenes doing per-frame work)
+    let offscreen = 0; // registered but frozen (skipped wholesale by the scheduler)
     for (const tk of tasks) {
-      if (!tk.active()) continue;
+      if (!tk.active() || !tk.onScreen()) { offscreen++; continue; }
       active++;
       strides[tk._stride] = (strides[tk._stride] ?? 0) + 1;
     }
     return {
       renders: sceneRenderCount,
       schedTicks,
-      activeScenes: active,
+      activeScenes: active, // scenes actually running onFrame + maybe rendering
+      offscreenScenes: offscreen, // frozen scenes (proof: these cost ~0)
       totalScenes: tasks.size,
       quality: qLevel,
       avgFrameMs: avgFrame,
@@ -288,8 +300,10 @@ const FULL_RATE_BUDGET = 2;
 function assignStrides() {
   // Rank active tasks by priority; the top FULL_RATE_BUDGET render every frame,
   // the next tier every 2nd frame, the rest every 3rd (or 4th when GPU-bound).
+  // Only ON-SCREEN tasks compete for the budget — off-screen scenes are frozen
+  // (skipped in the loop) so they neither render nor consume a full-rate slot.
   const live: SchedTask[] = [];
-  for (const tk of tasks) if (tk.active()) live.push(tk);
+  for (const tk of tasks) if (tk.active() && tk.onScreen()) live.push(tk);
   live.sort((a, b) => b.priority() - a.priority());
   const farStride = qLevel < 1 ? 4 : 3;
   for (let i = 0; i < live.length; i++) {
@@ -314,7 +328,9 @@ function schedulerLoop(now: number) {
   const t = now / 1000;
   const dt = Math.min(frameMs / 1000, 0.05);
   for (const tk of tasks) {
-    if (!tk.active()) continue;
+    // HARD FREEZE: an off-screen (non-intersecting) scene is skipped wholesale —
+    // no simulation, no render, fully idle. `active()` also covers document.hidden.
+    if (!tk.active() || !tk.onScreen()) continue;
     const render = (frameIndex % tk._stride) === tk._phase % tk._stride;
     tk.step(t, dt, render);
   }
@@ -436,7 +452,11 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     composer.addPass(outputPass);
   };
 
-  const ctxState = { quality: qLevel };
+  // `ticks` counts how many frame callbacks this scene has actually run. It only
+  // increments when the scene is ON-SCREEN and ticked, so a frozen off-screen
+  // scene's counter stays flat — that's the proof the hard-freeze works (perf
+  // tooling samples per-scene ticks via window.__sceneTicks in DEV).
+  const ctxState = { quality: qLevel, ticks: 0 };
   const ctx: SceneContext = {
     scene, camera, renderer, composer, host,
     clock: new THREE.Clock(),
@@ -495,12 +515,22 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   ro.observe(host);
 
   // ---- visibility + prominence (drives scheduler priority) ----
+  // `visible` is the HARD-FREEZE gate: true the moment any sliver of the host
+  // intersects the viewport, false once it's fully off-screen. An off-screen
+  // scene is skipped entirely by the scheduler (no sim, no render) — see the
+  // scheduler loop's onScreen() check. `wasOnScreen` lets `step` advance the
+  // scene clock by only a capped dt on the first frame back (clean resume, no
+  // jump forward by the whole time spent off-screen).
   let visible = true;
   let ratio = 1; // intersectionRatio in [0..1]
+  let wasOnScreen = false;
   const vis = new IntersectionObserver(
     ([e]) => {
       visible = e.isIntersecting;
       ratio = e.intersectionRatio;
+      // Going off-screen arms the clean-resume re-sync for the next time the
+      // scene scrolls back into view (see step()).
+      if (!visible) wasOnScreen = false;
     },
     // Multiple thresholds so prominence is continuous, not just on/off.
     { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] },
@@ -537,6 +567,10 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     _stride: 1,
     _phase: 0,
     active: () => visible && !document.hidden,
+    // HARD-FREEZE gate: only on-screen scenes tick. `active()` already excludes
+    // document.hidden; this adds the off-screen (non-intersecting) cutoff so a
+    // scrolled-away scene goes fully idle.
+    onScreen: () => visible,
     // Prominence: how centered/large on screen. Area gives big hero canvases a
     // boost; ratio fades scenes near the viewport edges.
     priority: () => ratio * (0.4 + 0.6 * areaWeight()) + (tier === 'hero' ? 1 : 0),
@@ -544,12 +578,32 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     // animation phase/intro logic is byte-identical to the old per-scene rAF; the
     // shared scheduler only supplies the frame delta and the render gate.
     step: (_t, dt, doRender) => {
+      // CLEAN RESUME after a freeze: while off-screen the scene was skipped, so
+      // ctx.clock kept advancing in wall-time but was never READ. Absorb that gap
+      // into a discarded delta (resets the clock's internal oldTime to now) so the
+      // very next getElapsedTime() advances by ~one frame, not by the whole span
+      // the scene spent off-screen — the animation resumes where it left off.
+      if (!wasOnScreen) {
+        wasOnScreen = true;
+        ctx.clock.getDelta(); // discard the off-screen wall-time gap (capped resume)
+      }
       const st = ctx.clock.getElapsedTime();
+      ctxState.ticks++;
       ctx.pointer.lerp(targetPointer, 0.06);
       for (const cb of frameCbs) cb(st, dt);
       if (doRender) render(st);
     },
   };
+
+  // DEV-only per-scene tick probe (tree-shaken from production): lets Playwright
+  // read a single scene's live tick count + on-screen state by host id and PROVE
+  // that an off-screen scene's counter is frozen while a visible one climbs.
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    const w = window as unknown as { __sceneTicks?: Record<string, () => unknown> };
+    if (!w.__sceneTicks) w.__sceneTicks = {};
+    const key = host.id || host.dataset.scene || `scene-${tasks.size}-${Math.random().toString(36).slice(2, 6)}`;
+    w.__sceneTicks[key] = () => ({ ticks: ctxState.ticks, onScreen: visible, ratio });
+  }
 
   // First frame always renders (so reduced-motion / first paint shows the world).
   const start = () => {

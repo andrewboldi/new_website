@@ -164,6 +164,7 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   let progress = 0;       // eased scroll progress 0..1
   let lastStage = -1;
   let lastI = -1, lastF = -1; // skip the morph loop when nothing changed
+  let webFrame = 0;       // throttle the bond-web rebuild (it's a blurred bg layer)
   // per-particle phase so the morph cascades organically instead of snapping in lockstep
   const stagger = new Float32Array(N);
   for (let k = 0; k < N; k++) stagger[k] = Math.random();
@@ -330,7 +331,12 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
       }
       geo.attributes.position.needsUpdate = true;
       geo.attributes.aColor.needsUpdate = true;
-      updateWeb();
+      // Throttle the bond-web rebuild to ~30fps: the web is a soft, blur(1px),
+      // 0.5-opacity background layer whose endpoints move slowly, so refreshing it
+      // every other frame is visually identical while halving its O(edges) cost on
+      // every content page (the morph particles themselves still update at the loop
+      // rate above). On the off-frame the previous bond positions persist one frame.
+      if ((webFrame++ & 1) === 0) updateWeb();
     }
 
     // bond web fades IN only as the structure resolves (last ~30% of denoising)
