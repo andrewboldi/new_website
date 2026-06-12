@@ -110,10 +110,85 @@ export function piano(handle: SceneHandle) {
 
   // ---- camera: low and angled, looking down the keybed toward the player so
   // the keys occupy the lower band and bars fall through the upper frame.
-  camera.position.set(0, 8.5, 16.5);
-  camera.lookAt(0, -1, -4);
+  // The keyboard is ~6 octaves wide, so it MUST be framed against the current
+  // container aspect or the ends clip. fitCamera() (below) pulls the camera
+  // back / tilts so the full width + the falling-bar sky always fit with margin,
+  // and re-runs on every resize (the framework only updates camera.aspect).
+  const LOOK_AT = new THREE.Vector3(0, 0.5, -2.0);
   camera.fov = 52;
-  camera.updateProjectionMatrix();
+  const FIT_PITCH = 0.40; // radians above horizontal — low, looking-down framing
+
+  // The full bounding box of everything that must stay on screen: the keyboard
+  // (its near edge is the widest thing in screen-space because of perspective)
+  // plus the falling-bar "sky" above the hit line. We fit by PROJECTING these
+  // eight corners and pushing the camera back until all of them sit inside the
+  // frustum with margin — exact regardless of camera tilt (a flat half-width
+  // calc under-estimates because the tilted near edge foreshortens outward).
+  const halfW = KEYBOARD_WIDTH / 2 + PITCH; // keys + a little side margin
+  const nearZ = KEYBED_Z + WHITE_LEN / 2; // near edge of keys (closest to cam)
+  const farZ = KEYBED_Z - WHITE_LEN / 2 - 1.5; // felt strip behind keys
+  const lowY = 0; // keybed floor
+  const skyTopY = HIT_Y + FALL_DIST * 0.6; // top of the dense falling-bar band
+  const fitCorners: THREE.Vector3[] = [];
+  for (const x of [-halfW, halfW])
+    for (const y of [lowY, skyTopY])
+      for (const z of [nearZ, farZ]) fitCorners.push(new THREE.Vector3(x, y, z));
+
+  const _fwd = new THREE.Vector3();
+  const _camPos = new THREE.Vector3();
+  const _rel = new THREE.Vector3();
+  const _proj = new THREE.Matrix4();
+
+  function fitCamera(): void {
+    const aspect = camera.aspect || (ctx.width / Math.max(1, ctx.height)) || 1.6;
+    const vFov = (camera.fov * Math.PI) / 180;
+    const tanV = Math.tan(vFov / 2);
+    const tanH = tanV * aspect;
+    const margin = 1.1; // 10% breathing room on every edge
+
+    // forward direction from camera toward look-at (camera sits up+back along it)
+    _fwd.set(0, -Math.sin(FIT_PITCH), -Math.cos(FIT_PITCH)).normalize();
+
+    // Binary-search the camera distance so all corners fit. Distance is along
+    // -_fwd from LOOK_AT. Monotonic: farther back → everything fits more easily.
+    let lo = 6, hi = 200;
+    const fits = (dist: number): boolean => {
+      _camPos.copy(LOOK_AT).addScaledVector(_fwd, -dist);
+      camera.position.copy(_camPos);
+      camera.lookAt(LOOK_AT);
+      camera.updateMatrixWorld();
+      _proj.copy(camera.matrixWorldInverse); // world → view
+      for (const c of fitCorners) {
+        _rel.copy(c).applyMatrix4(_proj); // view space (cam looks down -Z)
+        const depth = -_rel.z;
+        if (depth <= 0.05) return false; // behind/at camera
+        if (Math.abs(_rel.x) > depth * tanH / margin) return false;
+        if (Math.abs(_rel.y) > depth * tanV / margin) return false;
+      }
+      return true;
+    };
+    for (let i = 0; i < 26; i++) {
+      const mid = (lo + hi) / 2;
+      if (fits(mid)) hi = mid; else lo = mid;
+    }
+    // apply the smallest fitting distance (hi)
+    _camPos.copy(LOOK_AT).addScaledVector(_fwd, -hi);
+    camera.position.copy(_camPos);
+    camera.lookAt(LOOK_AT);
+    camera.updateProjectionMatrix();
+  }
+  fitCamera();
+
+  // Re-fit whenever the container changes size/aspect. The framework's own
+  // ResizeObserver updates camera.aspect in a separate rAF; we observe too and
+  // reframe so the full board keeps fitting (no clipping at any aspect).
+  const fitRO = new ResizeObserver(() => {
+    const w = host.clientWidth || ctx.width || 1;
+    const h = host.clientHeight || ctx.height || 1;
+    camera.aspect = w / h; // ensure correct even if our RO fires first
+    fitCamera();
+  });
+  fitRO.observe(host);
 
   // ---- lighting (mostly emissive, but a soft key light gives the keys form).
   scene.add(new THREE.AmbientLight(0x14253a, 0.7));
@@ -469,6 +544,7 @@ export function piano(handle: SceneHandle) {
 
   // -------------------------------------------------------------- dispose
   onDispose(() => {
+    fitRO.disconnect();
     audio.dispose();
     btn.el.remove();
     whiteGeo.dispose();
@@ -578,14 +654,40 @@ interface PianoAudio {
   dispose: () => void;
 }
 
-/** A minimal polyphonic piano-ish synth. Triangle + sine-octave, fast attack,
- *  exponential decay; polyphony-capped; alloc-light. Muted until toggled. */
+/**
+ * A light, self-contained grand-piano voice (no sample assets).
+ *
+ * Each note is an additive stack of a handful of partials whose frequencies are
+ * STRETCHED by an inharmonicity coefficient — f_k = k·f0·√(1 + B·k²) — exactly
+ * how real piano strings behave (the overtones run progressively sharp, which is
+ * a big part of what makes a piano sound like a piano rather than an organ).
+ *
+ * Amplitude shaping per voice:
+ *  - ADSR with a near-instant percussive attack (~4 ms) and a long, natural
+ *    exponential decay, plus a gentle release so tails don't click.
+ *  - A LOWPASS filter that starts open and CLOSES as the note decays, so the
+ *    timbre darkens over time (upper partials die first — characteristic piano).
+ *  - VELOCITY drives both level and brightness: harder strikes are louder and
+ *    open the filter further (more partials), softer strikes are dull + quiet.
+ *  - A very short filtered NOISE burst at onset models the hammer/key "thunk".
+ *  - Slight per-partial DETUNE + a stereo spread give it body and width.
+ *
+ * Polyphony is capped; every voice tears its nodes down on the scheduled tail
+ * (onended) so there are no leaks. Muted until the user toggles it.
+ */
 function createAudio(_getKeys: () => Map<number, KeyRec>): PianoAudio {
   let actx: AudioContext | null = null;
   let master: GainNode | null = null;
+  let bus: GainNode | null = null; // soft saturation bus -> master
+  let comp: DynamicsCompressorNode | null = null;
+  let noiseBuf: AudioBuffer | null = null; // shared hammer-noise source buffer
   let audible = false;
-  const MAX_VOICES = 16;
+  const MAX_VOICES = 14;
   let voices = 0;
+
+  // Relative amplitudes of the partial stack (1st..6th). Front-loaded toward the
+  // fundamental with a gentle rolloff — warm, not buzzy.
+  const PARTIAL_GAINS = [1.0, 0.55, 0.32, 0.18, 0.10, 0.06];
 
   const ensure = () => {
     if (actx) return actx;
@@ -595,7 +697,25 @@ function createAudio(_getKeys: () => Map<number, KeyRec>): PianoAudio {
     actx = new AC();
     master = actx.createGain();
     master.gain.value = 0.0;
+    // Gentle glue compression + a soft-clip bus so dense chords stay smooth and
+    // never harsh/overbright (mirrors the visual "never blow out" principle).
+    comp = actx.createDynamicsCompressor();
+    comp.threshold.value = -18;
+    comp.knee.value = 24;
+    comp.ratio.value = 3;
+    comp.attack.value = 0.004;
+    comp.release.value = 0.25;
+    bus = actx.createGain();
+    bus.gain.value = 0.9;
+    bus.connect(comp);
+    comp.connect(master);
     master.connect(actx.destination);
+
+    // Pre-render a short white-noise buffer once for hammer transients.
+    const len = Math.floor(actx.sampleRate * 0.08);
+    noiseBuf = actx.createBuffer(1, len, actx.sampleRate);
+    const data = noiseBuf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = Math.random() * 2 - 1;
     return actx;
   };
 
@@ -609,49 +729,133 @@ function createAudio(_getKeys: () => Map<number, KeyRec>): PianoAudio {
       audible = !audible;
       if (master) {
         master.gain.cancelScheduledValues(ac.currentTime);
-        master.gain.linearRampToValueAtTime(audible ? 0.55 : 0.0, ac.currentTime + 0.08);
+        master.gain.linearRampToValueAtTime(audible ? 0.5 : 0.0, ac.currentTime + 0.08);
       }
       if (audible) api.onResume();
       return audible;
     },
     noteOn(n, v, d) {
-      if (!audible || !actx || !master) return;
+      if (!audible || !actx || !master || !bus || !noiseBuf) return;
       if (voices >= MAX_VOICES) return;
       try {
         const now = actx.currentTime;
-        const f = midiToFreq(n);
-        const g = actx.createGain();
-        const dur = Math.min(Math.max(d, 0.12), 1.6);
-        const peak = 0.18 + v * 0.5;
-        g.gain.setValueAtTime(0.0001, now);
-        g.gain.exponentialRampToValueAtTime(peak, now + 0.006);
-        g.gain.exponentialRampToValueAtTime(0.0001, now + dur + 0.25);
-        g.connect(master);
+        const f0 = midiToFreq(n);
+        const nyq = actx.sampleRate * 0.5;
+        // register 0 (low) .. 1 (high) — used to scale brightness/decay/level
+        const reg = THREE.MathUtils.clamp((n - 21) / (108 - 21), 0, 1);
+        const vel = THREE.MathUtils.clamp(v, 0.05, 1);
 
-        const o1 = actx.createOscillator();
-        o1.type = 'triangle';
-        o1.frequency.value = f;
-        const o2 = actx.createOscillator();
-        o2.type = 'sine';
-        o2.frequency.value = f * 2;
-        const g2 = actx.createGain();
-        g2.gain.value = 0.35;
-        o1.connect(g);
-        o2.connect(g2);
-        g2.connect(g);
+        // --- per-voice envelope timing ---
+        // Long bass tails, shorter treble; harder notes ring a touch longer.
+        const decay = (2.6 - reg * 1.7) * (0.85 + vel * 0.4); // seconds to ~ -60dB
+        const dur = Math.min(Math.max(d, 0.18), decay);
+        const release = 0.18 + (1 - reg) * 0.22;
+        const stop = now + dur + release + 0.05;
 
+        // --- amplitude envelope (ADSR: fast attack, exp decay, soft release) ---
+        const amp = actx.createGain();
+        const peak = (0.10 + vel * 0.42) * (1.0 - reg * 0.28); // tame high keys
+        amp.gain.setValueAtTime(0.0001, now);
+        amp.gain.exponentialRampToValueAtTime(peak, now + 0.004); // ~4ms hammer
+        // natural exponential decay toward a low floor over the note body
+        amp.gain.exponentialRampToValueAtTime(peak * 0.28, now + 0.18);
+        amp.gain.exponentialRampToValueAtTime(0.0001, now + dur + release);
+
+        // --- decay-closing lowpass: bright at onset, darkens as it rings ---
+        const lp = actx.createBiquadFilter();
+        lp.type = 'lowpass';
+        lp.Q.value = 0.6;
+        const openHz = Math.min(nyq, f0 * (6 + vel * 14) + 1200); // velocity → brightness
+        const closeHz = Math.min(nyq, Math.max(f0 * 2.2, 700));
+        lp.frequency.setValueAtTime(openHz, now);
+        lp.frequency.exponentialRampToValueAtTime(closeHz, now + dur * 0.9 + release);
+        lp.connect(amp);
+
+        // --- stereo placement: spread low→left, high→right a little ---
+        let dest: AudioNode = bus;
+        let panner: StereoPannerNode | null = null;
+        if (typeof actx.createStereoPanner === 'function') {
+          panner = actx.createStereoPanner();
+          panner.pan.value = (reg - 0.5) * 0.5;
+          amp.connect(panner);
+          panner.connect(bus);
+          dest = panner;
+        } else {
+          amp.connect(bus);
+        }
+        void dest;
+
+        // --- inharmonic partial stack ---
+        // B = inharmonicity coefficient; larger for the bass (thicker strings).
+        const B = 0.0004 + (1 - reg) * 0.0011;
+        const oscs: OscillatorNode[] = [];
+        const maxPartials = Math.min(
+          PARTIAL_GAINS.length,
+          // fewer partials up high (they'd fold past Nyquist anyway) + soft notes
+          Math.max(2, Math.round((3 + vel * 3) * (1 - reg * 0.4))),
+        );
+        for (let k = 1; k <= maxPartials; k++) {
+          const stretch = Math.sqrt(1 + B * k * k);
+          const fk = f0 * k * stretch;
+          if (fk > nyq * 0.95) break;
+          const o = actx.createOscillator();
+          o.type = k === 1 ? 'triangle' : 'sine'; // fundamental a hair richer
+          o.frequency.value = fk;
+          // subtle, partial-dependent detune for chorused string body
+          o.detune.value = (k % 2 ? 1 : -1) * (1.5 + k * 0.8);
+          const pg = actx.createGain();
+          pg.gain.value = PARTIAL_GAINS[k - 1] / maxPartials;
+          o.connect(pg);
+          pg.connect(lp);
+          oscs.push(o);
+        }
+
+        // --- hammer transient: a very short, band-limited noise burst ---
+        const noise = actx.createBufferSource();
+        noise.buffer = noiseBuf;
+        const nbp = actx.createBiquadFilter();
+        nbp.type = 'bandpass';
+        nbp.frequency.value = Math.min(nyq * 0.9, f0 * 3 + 800);
+        nbp.Q.value = 0.7;
+        const ng = actx.createGain();
+        const nAmp = (0.05 + vel * 0.12) * (0.6 + reg * 0.7); // brighter "click" up high
+        ng.gain.setValueAtTime(nAmp, now);
+        ng.gain.exponentialRampToValueAtTime(0.0001, now + 0.045);
+        noise.connect(nbp);
+        nbp.connect(ng);
+        ng.connect(lp);
+
+        // --- start / schedule stop ---
         voices++;
-        const stop = now + dur + 0.3;
-        o1.start(now); o2.start(now);
-        o1.stop(stop); o2.stop(stop);
-        const done = () => { voices = Math.max(0, voices - 1); g.disconnect(); g2.disconnect(); };
-        o1.onended = done;
+        for (const o of oscs) { o.start(now); o.stop(stop); }
+        noise.start(now);
+        noise.stop(now + 0.08);
+
+        let cleaned = false;
+        const done = () => {
+          if (cleaned) return;
+          cleaned = true;
+          voices = Math.max(0, voices - 1);
+          try {
+            for (const o of oscs) o.disconnect();
+            noise.disconnect();
+            nbp.disconnect();
+            ng.disconnect();
+            lp.disconnect();
+            amp.disconnect();
+            panner?.disconnect();
+          } catch { /* noop */ }
+        };
+        // fire cleanup on the last oscillator that ends (fallback: noise)
+        if (oscs.length) oscs[oscs.length - 1].onended = done;
+        else noise.onended = done;
       } catch { /* never let audio break the scene */ }
     },
     setTransport() { /* synth is event-driven from the same frame loop */ },
     dispose() {
       try { actx?.close(); } catch { /* noop */ }
-      actx = null; master = null; audible = false;
+      actx = null; master = null; bus = null; comp = null; noiseBuf = null;
+      audible = false;
     },
   };
   return api;
