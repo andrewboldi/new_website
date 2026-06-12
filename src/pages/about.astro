@@ -144,20 +144,26 @@ const lab = [
         <h2 class="display sec-title" data-reveal>The other half<br/>of the brain.</h2>
       </header>
 
-      <div class="poly__piano" data-reveal>
-        <div class="poly__piano-scene"><Scene name="piano" /></div>
-        <div class="poly__piano-cap">
-          <p class="eyebrow">At the piano</p>
-          <h3 class="display poly__piano-title">Chopin — “Revolutionary.”</h3>
-          <p class="poly__piano-sub">
-            I’ve performed at Carnegie Hall and Merkin Hall. This is my Étude Op. 10 No. 12
-            in C minor — rendered live from the score, every note in real time. Tap the
-            speaker in the corner to hear it.
-          </p>
-          <a class="btn poly__piano-link" href="https://youtube.com/@AndrewBoldiPiano" target="_blank" rel="noopener noreferrer">Watch me play ↗</a>
-          <p class="poly__piano-credit mono">MIDI: B. Krüger · piano-midi.de (CC BY-SA) · composition public domain</p>
-        </div>
+    </div>
+
+    <!-- full-bleed piano: breaks out of .wrap so the 6-octave keyboard never clips;
+         caption stacks below the keyboard, constrained to a readable column. -->
+    <div class="poly__piano" data-reveal>
+      <div class="poly__piano-scene"><Scene name="piano" /></div>
+      <div class="wrap poly__piano-cap">
+        <p class="eyebrow">At the piano</p>
+        <h3 class="display poly__piano-title">Chopin — “Revolutionary.”</h3>
+        <p class="poly__piano-sub">
+          I’ve performed at Carnegie Hall and Merkin Hall. This is my Étude Op. 10 No. 12
+          in C minor — rendered live from the score, every note in real time. Tap the
+          speaker in the corner to hear it.
+        </p>
+        <a class="btn poly__piano-link" href="https://youtube.com/@AndrewBoldiPiano" target="_blank" rel="noopener noreferrer">Watch me play ↗</a>
+        <p class="poly__piano-credit mono">MIDI: B. Krüger · piano-midi.de (CC BY-SA) · composition public domain</p>
       </div>
+    </div>
+
+    <div class="wrap">
 
       <div class="poly__grid">
         {POLYMATH.map((p, i) => (
@@ -245,13 +251,24 @@ const lab = [
       linear-gradient(180deg, var(--bg) 0%, transparent 22%, transparent 78%, var(--bg) 100%),
       linear-gradient(90deg, var(--bg) 0%, transparent 18%, transparent 82%, var(--bg) 100%); }
 
-  /* curiosities */
-  .curio__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; }
-  .curio__tile { padding: 0; overflow: hidden; }
-  .curio__scene { height: 280px; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
-  /* let the embedded host fill the tile rather than overflow it */
+  /* curiosities — un-boxed: strip the card frame so each scene sits on the page */
+  .curio__grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 1.5rem 2rem; }
+  .curio__tile { padding: 0; overflow: visible; border: none; background: none; box-shadow: none; }
+  /* the scene dissolves into the page via a soft radial+linear mask (no box bg, no clip) */
+  .curio__scene {
+    height: 300px; position: relative;
+    -webkit-mask-image:
+      radial-gradient(115% 120% at 50% 48%, #000 52%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+    mask-image:
+      radial-gradient(115% 120% at 50% 48%, #000 52%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+  /* let the embedded host fill the area rather than overflow it */
   .curio__scene :global(.scene-host) { height: 100%; min-height: 0; }
-  .curio__cap { padding: 1rem 1.4rem 1.4rem; font-size: 0.92rem; color: var(--ink-dim); }
+  .curio__cap { padding: 0.4rem 0.6rem 0; font-size: 0.92rem; color: var(--ink-dim); text-align: center; }
   @media (max-width: 980px) { .curio__grid { grid-template-columns: 1fr 1fr; } }
   @media (max-width: 640px) { .curio__grid { grid-template-columns: 1fr; } }
 
@@ -261,11 +278,20 @@ const lab = [
   .lab__row { display: grid; grid-template-columns: 1.1fr 1fr; gap: 2.5rem; align-items: center; }
   .lab__row--alt { direction: rtl; }
   .lab__row--alt > * { direction: ltr; }
+  /* un-boxed: no border/box bg; the scene sits on the page and dissolves at its
+     edges via a soft radial+linear mask (no hard clip), like the ambient GFP. */
   .lab__scene {
-    height: 340px; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
-    background: radial-gradient(circle at 50% 45%, rgba(0,153,255,0.07), transparent 70%);
+    height: 360px; position: relative;
+    -webkit-mask-image:
+      radial-gradient(120% 120% at 50% 50%, #000 55%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 9%, #000 91%, transparent 100%);
+    mask-image:
+      radial-gradient(120% 120% at 50% 50%, #000 55%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 9%, #000 91%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
   }
-  /* enforce the inner host fills the box (no clipping of the animation) */
+  /* let the inner host fill the area (no clipping of the animation) */
   .lab__scene :global(.scene-host) { height: 100%; min-height: 0; }
   .lab__eyebrow { color: var(--cyan); }
   .lab__title { font-size: clamp(1.6rem, 1.2rem + 2vw, 2.6rem); margin: 0.5rem 0 1rem; }
@@ -285,27 +311,45 @@ const lab = [
   .poly__lines li { font-size: 0.94rem; color: #c2cce0; }
   .poly__lines li::marker { color: var(--cyan); }
 
-  /* polymath — featured piano */
-  .poly__piano { display: grid; grid-template-columns: 1.3fr 1fr; gap: 1.5rem; align-items: center;
-    margin-bottom: 1.6rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
-    background: radial-gradient(circle at 28% 40%, rgba(0,153,255,0.08), transparent 70%); }
-  .poly__piano-scene { height: 420px; min-width: 0; }
+  /* polymath — featured piano, un-boxed & FULL-BLEED so the 6-octave keyboard
+     never clips: spans the viewport, no border/box bg/clip, caption stacks below. */
+  .poly__piano {
+    position: relative; width: 100vw; left: 50%; margin-left: -50vw;
+    margin-top: 0.5rem; margin-bottom: 2rem;
+  }
+  /* keyboard gets the whole screen width; soft horizontal mask dissolves the
+     scene into the page at the left/right edges instead of a hard box cut. */
+  .poly__piano-scene {
+    height: clamp(360px, 42vw, 520px); width: 100%; min-width: 0;
+    -webkit-mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);
+    mask-image: linear-gradient(90deg, transparent 0%, #000 7%, #000 93%, transparent 100%);
+  }
   .poly__piano-scene :global(.scene-host) { height: 100%; min-height: 0; }
-  .poly__piano-cap { padding: 1.6rem 1.8rem 1.6rem 0; }
+  /* caption re-enters the readable column (it carries the .wrap class) */
+  .poly__piano-cap { margin-top: -1rem; position: relative; z-index: 1; }
   .poly__piano-title { font-size: clamp(1.5rem, 1.2rem + 1.8vw, 2.4rem); margin: 0.4rem 0 0.8rem; }
-  .poly__piano-sub { font-size: 1rem; line-height: 1.7; color: #c2cce0; max-width: 44ch; }
+  .poly__piano-sub { font-size: 1rem; line-height: 1.7; color: #c2cce0; max-width: 52ch; }
   .poly__piano-link { margin-top: 1.1rem; }
   .poly__piano-credit { margin-top: 1.1rem; font-size: 0.64rem; color: var(--ink-faint); letter-spacing: 0.03em; }
   @media (max-width: 760px) {
-    .poly__piano { grid-template-columns: 1fr; }
-    .poly__piano-scene { height: 320px; }
-    .poly__piano-cap { padding: 0 1.4rem 1.4rem; }
+    .poly__piano-scene { height: clamp(280px, 50vw, 360px); }
   }
 
   /* coursework */
   .course__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 2rem; }
-  .course__scene { height: 240px; margin-bottom: 1rem; border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: radial-gradient(circle at 50% 50%, rgba(0,153,255,0.06), transparent 70%); }
-  /* the embedded scene host enforces min-height:240px; let it fill (not overflow) this box */
+  /* un-boxed: no border/box bg; scene dissolves into the page via a soft mask */
+  .course__scene {
+    height: 240px; margin-bottom: 1rem; position: relative;
+    -webkit-mask-image:
+      radial-gradient(125% 125% at 50% 48%, #000 50%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+    mask-image:
+      radial-gradient(125% 125% at 50% 48%, #000 50%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 10%, #000 90%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+  /* the embedded scene host enforces min-height:240px; let it fill (not overflow) */
   .course__scene :global(.scene-host) { height: 100%; min-height: 0; }
   .course__area { color: var(--cyan); font-size: 0.78rem; letter-spacing: 0.08em; padding-bottom: 0.8rem; border-bottom: 1px solid var(--line); margin-bottom: 1rem; }
   .course__col ul { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.6rem; }
