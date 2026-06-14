@@ -246,18 +246,32 @@ export function heroField(handle: SceneHandle) {
   const COUNT = WIDTH * WIDTH;
 
   const cloudColor = new THREE.Color(PALETTE.cyan).lerp(new THREE.Color(PALETTE.blue), 0.35);
-  // Cap the hero's pixel ratio LOW (≤1.0). index.astro mounts the hero at
-  // maxPixelRatio:2 on the 'feature' tier (bloom+finish+SMAA), so at high DPR the
-  // fullscreen additive fill + post passes multiply in cost for no visible gain on
-  // a soft glowing cloud. The hero is a full-viewport additive cloud — the #1 fill
-  // sink — so we render it at ≤1.0 effective px (CSS upscales) and let the governor
-  // pull it lower still under load. We OWN the renderer here, so we drive its pixel
-  // ratio directly each frame from the governor quality (the core governor's
-  // applyPixelRatio targets `baseCap` which we override, so we manage DPR ourselves).
+  // RENDER THE HERO AT A FRACTION OF CSS RESOLUTION (CSS upscales). index.astro
+  // mounts the hero at maxPixelRatio:2 on the 'feature' tier (bloom+finish+SMAA),
+  // so at native res on a 2560×1600 hi-DPI display the fullscreen additive fill +
+  // post passes are ~2.8× heavier than the 1600×900 they were tuned at — they
+  // saturate a weak Intel iGPU and starve the 165Hz compositor. The hero is a
+  // soft glowing additive cloud (the #1 fullscreen fill sink), which upscales
+  // nearly invisibly, so we render its buffer at ~0.6× CSS res by default and let
+  // the governor pull it toward ~0.4× under load. We OWN the renderer here, so we
+  // drive its pixel ratio directly (the core governor's applyPixelRatio targets
+  // `baseCap` which we override here, so we manage the hero's DPR ourselves).
+  //
+  // HERO_DPR_CAP is the hard ceiling on effective device-pixel-ratio; HERO_SCALE
+  // is the default fraction-of-CSS we render at. Effective buffer px per CSS px =
+  // min(devicePixelRatio, CAP) × scale, floored so it never turns to mush.
   const HERO_DPR_CAP = 1.0;
-  // governor → effective DPR multiplier (sub-1.0 = render fewer pixels, upscale).
-  const heroDprScale = (q: number) => (q >= 1 ? 1 : q >= 0.75 ? 0.85 : q >= 0.5 ? 0.7 : 0.6);
-  let dpr = Math.min(devicePixelRatio || 1, HERO_DPR_CAP);
+  // Default 0.6× CSS res: measured on the Intel UHD iGPU at 2560×1600, dropping
+  // below 0.6× gave NO further frame-time gain (the hero render is past the fill
+  // knee — its p50 is already 16.7ms / 60fps at 0.6×), so 0.6× is the sweet spot
+  // that keeps the soft cloud crispest for the same cost. The governor still pulls
+  // it toward the 0.4× floor under sustained load.
+  const HERO_SCALE = 0.6;
+  const HERO_MIN_DPR = 0.4;   // never below 0.4× (soft cloud still reads upscaled)
+  // governor → scale multiplier on top of HERO_SCALE (deeper load → fewer pixels):
+  //   q=1 →0.6×, 0.75→0.5×, 0.5→0.42×, <0.5→0.4× (floored). All upscaled by CSS.
+  const heroDprScale = (q: number) => HERO_SCALE * (q >= 1 ? 1 : q >= 0.75 ? 0.84 : q >= 0.5 ? 0.7 : 0.67);
+  let dpr = Math.max(HERO_MIN_DPR, Math.min(devicePixelRatio || 1, HERO_DPR_CAP) * HERO_SCALE);
   renderer.setPixelRatio(dpr);
   // Molecule fit: a touch larger than R so the ball-and-stick fills the frame.
   const molScale = (R * 1.15) / CAFFEINE_RADIUS;
@@ -508,8 +522,12 @@ export function heroField(handle: SceneHandle) {
     if (reduced || !usedGPGPU) targetFrac = 1; // keep full look on the static/CPU paths
     // FILL: pull the hero's render resolution down under load (CSS upscales). The
     // full-viewport additive cloud is fill-bound, so fewer pixels is the biggest
-    // per-frame win on a weak iGPU. Re-apply renderer size at the new ratio.
-    const wantDpr = Math.min(devicePixelRatio || 1, HERO_DPR_CAP) * heroDprScale(q);
+    // per-frame win on a weak iGPU. heroDprScale already folds in HERO_SCALE (the
+    // default 0.6× fraction); floor at HERO_MIN_DPR so it never gets mushy.
+    const wantDpr = Math.max(
+      HERO_MIN_DPR,
+      Math.min(devicePixelRatio || 1, HERO_DPR_CAP) * heroDprScale(q),
+    );
     if (Math.abs(wantDpr - dpr) > 0.01) {
       dpr = wantDpr;
       renderer.setPixelRatio(dpr);

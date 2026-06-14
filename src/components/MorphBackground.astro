@@ -42,6 +42,13 @@
       // Capped low: the fBm is blurred + low-opacity behind everything, so extra
       // resolution is invisible but costs fill on every frame it renders.
       maxPixelRatio: mobile ? 1.0 : 1.1,
+      // FULLSCREEN fill sink: this fBm fills the whole fixed viewport every frame
+      // it renders. It's already blurred (2px) + low-opacity (~0.42–0.5), so it's
+      // the MOST forgiving fullscreen scene — render its buffer at 0.5× CSS res
+      // (CSS upscales). The blur erases any softening; fill drops ~4× vs native at
+      // 2560×1600. (Tested 0.42× too — no extra frame-time gain past the fill knee,
+      // so 0.5× keeps it cleaner for the same cost.) Governor → 0.4× floor on load.
+      renderScale: 0.5,
     });
 
     const tag = document.getElementById('field-tag');
@@ -58,7 +65,18 @@
             dot.style.boxShadow = `0 0 12px ${c}`;
           }
         },
-      }), { bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 }, alpha: true, maxPixelRatio: 1.15 });
+      }), {
+        bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 },
+        alpha: true,
+        maxPixelRatio: 1.15,
+        // FULLSCREEN fill sink: the molecular morph field + its bloom pass fill the
+        // whole fixed viewport. Soft additive points behind page content upscale
+        // nearly invisibly, so render the buffer (and its half-res bloom mip) at
+        // 0.6× CSS res — fill drops ~2.8× at 2560×1600. The governor pushes it lower
+        // still under load (down toward 0.4×). Kept a touch above ambient's 0.5×
+        // because the points have finer structure than the blurred fBm.
+        renderScale: 0.6,
+      });
   };
   document.addEventListener('astro:page-load', mountFields);
 </script>

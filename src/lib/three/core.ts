@@ -169,6 +169,21 @@ export interface CreateSceneOpts {
   /** cap the device pixel ratio (cheaper for large/background canvases) */
   maxPixelRatio?: number;
   /**
+   * Internal RENDER SCALE in (0..1] — render the drawing buffer at this fraction
+   * of CSS resolution and let CSS upscale the canvas to 100% (three.js sets the
+   * canvas style to the CSS size, the buffer to size×pixelRatio, so a sub-1.0
+   * effective pixel ratio = fewer pixels, stretched). On a hi-DPI display fill
+   * scales with pixel COUNT, so this is the single biggest lever for FULLSCREEN
+   * scenes (the hero cloud + the page-wide fBm/molecular backgrounds): a soft,
+   * glowy, blurred field upscales nearly invisibly but costs 2–4× less to fill.
+   *
+   * Default 1.0 (small tile/feature scenes render crisp at native). Fullscreen
+   * scenes should pass ~0.5–0.66. The governor multiplies this DOWN further under
+   * load (see applyPixelRatio's loadScale) — fullscreen scenes can reach ~0.4×.
+   * The effective pixel ratio is floored at 0.4 so it never gets mushy.
+   */
+  renderScale?: number;
+  /**
    * Quality tier (default 'feature'):
    *  - 'hero'    full composer, pixelRatio ≤2 (≤1.5 under load), always high
    *              scheduler priority. For the homepage centerpiece.
@@ -375,6 +390,10 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   // opts.maxPixelRatio still wins so callers can override.
   const tierCap = tier === 'tile' ? 1 : tier === 'hero' ? 2 : 1.5;
   const baseCap = opts.maxPixelRatio ?? tierCap;
+  // Internal render scale (fraction of CSS resolution the buffer is rendered at;
+  // CSS upscales). Default 1.0 = native; fullscreen scenes pass ~0.5–0.66 to cut
+  // fill on hi-DPI displays. Clamped to (0..1] so it can only ever REDUCE pixels.
+  const renderScale = Math.min(1, Math.max(0.1, opts.renderScale ?? 1));
 
   const renderer = new THREE.WebGLRenderer({
     // Native MSAA only matters when rendering straight to screen (tiles with no
@@ -383,7 +402,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     alpha: opts.alpha ?? true,
     powerPreference: 'high-performance',
   });
-  let curPixelRatio = Math.min(devicePixelRatio, baseCap);
+  let curPixelRatio = Math.min(devicePixelRatio, baseCap) * renderScale;
   renderer.setPixelRatio(curPixelRatio);
   renderer.setSize(width, height);
   renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -499,10 +518,15 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     // is the #1 fill lever on a weak iGPU. Tiles too (their full-screen siblings
     // dominate fill; a tile at 0.8 DPR is still crisp at its small size).
     const loadScale = qLevel >= 1 ? 1 : qLevel >= 0.75 ? 0.8 : qLevel >= 0.5 ? 0.65 : 0.5;
-    const want = Math.min(devicePixelRatio, baseCap) * loadScale;
-    // Allow sub-1.0 effective pixel ratio under load (CSS upscales) — this is
-    // where the big fill wins come from. Floor at 0.5 so it never gets mushy.
-    const clamped = Math.max(0.5, want);
+    // renderScale (the scene's BASE fraction of CSS res) multiplies the governor's
+    // load scale, so a fullscreen scene defaulting to 0.6× drops to ~0.4× under
+    // deep load — the big fill win on a hi-DPI iGPU.
+    const want = Math.min(devicePixelRatio, baseCap) * renderScale * loadScale;
+    // Allow sub-1.0 effective pixel ratio (CSS upscales) — this is where the big
+    // fill wins come from. Floor at 0.4 so it never gets mushy (a soft glowy
+    // fullscreen field upscales fine; the floor protects crisp tiles which keep
+    // renderScale 1.0 and so only reach this floor under the deepest load).
+    const clamped = Math.max(0.4, want);
     if (Math.abs(clamped - curPixelRatio) > 0.01) {
       curPixelRatio = clamped;
       renderer.setPixelRatio(clamped);
