@@ -474,28 +474,6 @@ export function heroField(handle: SceneHandle) {
 
   let progress = reduced ? 1 : 0;
 
-  /* --------------------- active-scroll compute pause -------------------- */
-  // The hero host is `position: fixed; inset: 0`, so it NEVER leaves the viewport
-  // — the core hard-freeze can't idle it while you read the homepage. But the
-  // costly GPGPU curl-noise sim is exactly what we DON'T want fighting the browser
-  // during the layout/paint storm of an active scroll (Andrew's #1 rule: buttery
-  // scroll). So while the user is actively scrolling we SKIP gpu.compute() and
-  // only keep applying the cheap eased uProgress morph (the molecule still forms/
-  // disperses on scroll — that's the visible response). The curl swirl simply
-  // holds its last position texture for those few frames, then resumes the moment
-  // scrolling settles (~120ms after the last scroll event). The swirl is slow and
-  // organic, so a brief pause is invisible — no pop. Off-frames still accumulate
-  // delta (capped) so the sim doesn't slow-mo or jump when it resumes.
-  let scrolling = false;
-  let scrollTimer = 0;
-  const SCROLL_IDLE_MS = 120;
-  const onScroll = () => {
-    scrolling = true;
-    if (scrollTimer) clearTimeout(scrollTimer);
-    scrollTimer = window.setTimeout(() => { scrolling = false; }, SCROLL_IDLE_MS);
-  };
-  if (!reduced) window.addEventListener('scroll', onScroll, { passive: true });
-
   /* --------------------- adaptive quality (governor) -------------------- */
   // The hero always renders at full rate, so it carries a steady GPU cost. When
   // the global governor reports the page is GPU-bound it calls onQuality(q) with
@@ -548,15 +526,6 @@ export function heroField(handle: SceneHandle) {
   // same applyQuality path the real governor uses.
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     (window as any).__HERO_FORCE_QUALITY__ = (q: number) => applyQuality(q);
-    // Force the active-scroll flag on/off WITHOUT real scroll events, so a test can
-    // prove the compute-pause deterministically (frame-rate-independent): pin
-    // scrolling=true and computeCount must stay FLAT across many frames; pin false
-    // and it must climb. Passing null returns control to the real scroll listener.
-    (window as any).__HERO_FORCE_SCROLLING__ = (v: boolean | null) => {
-      if (v === null) { scrolling = false; return; }
-      if (scrollTimer) { clearTimeout(scrollTimer); scrollTimer = 0; }
-      scrolling = v;
-    };
     (window as any).__HERO_ADAPT__ = () => ({
       path: usedGPGPU ? `gpgpu-${WIDTH}` : `cpu-${RENDER_W}`,
       renderCount: RENDER_COUNT,
@@ -564,8 +533,8 @@ export function heroField(handle: SceneHandle) {
       drawCount: (geo.drawRange.count === Infinity ? RENDER_COUNT : geo.drawRange.count),
       uSize: renderMat.uniforms.uSize?.value,
       uAlpha: renderMat.uniforms.uAlpha?.value,
-      scrolling,           // true while actively scrolling (compute paused)
-      computeCount,        // total gpu.compute() calls — flat while scroll-paused
+      progress,            // live eased morph (tracks scroll) — read at mid-scroll
+      computeCount,        // total gpu.compute() calls — climbs every scroll frame
     });
   }
 
@@ -583,9 +552,12 @@ export function heroField(handle: SceneHandle) {
       return;
     }
 
-    // eased scroll progress (smooth, scrubbed — never snappy)
+    // eased scroll progress — tracks the scroll CLOSELY (short ~80ms time
+    // constant) so the morph follows the scrollbar live instead of trailing it,
+    // while the per-frame lerp still removes any wheel-step jitter (smooth, not
+    // snappy). delta*12 ≈ catch up ~63% of the gap each frame at 60fps.
     const target = heroProgress();
-    progress += (target - progress) * Math.min(1, delta * 4);
+    progress += (target - progress) * Math.min(1, delta * 12);
 
     // gentle "alive" breathing at the very top before the user scrolls
     const breathe = progress < 0.02 ? (Math.sin(t * 0.5) * 0.5 + 0.5) * 0.06 : 0;
@@ -614,13 +586,16 @@ export function heroField(handle: SceneHandle) {
       // scroll stay buttery-smooth even though the underlying sim advances slower.
       const simInterval = computeStride >= 3 ? 1 / 20 : 1 / 30;
       computeAccum += delta;
-      // PAUSE the expensive curl-noise sim while the user is actively scrolling
-      // (decouple it from the busy scroll frames) OR once the hero has fully faded
-      // out below the fold (canvasOpacity ~0 → nothing to compute for). The cheap
-      // eased uProgress morph below still runs, so the molecule keeps responding to
-      // scroll. computeAccum keeps growing (capped at simInterval when consumed) so
-      // the swirl resumes at the right phase with no slow-mo and no jump.
-      const computePaused = scrolling || canvasOpacity <= 0.001;
+      // Keep the curl-noise sim RUNNING during scroll. (We used to pause it while
+      // `scrolling` — but the page now holds 60fps, and freezing the swirl made
+      // the particles visibly stall on scroll then jump when scrolling settled:
+      // exactly the "delay before it renders" Andrew felt. The sim already runs
+      // at a throttled ~30fps stride, which is cheap enough to keep advancing
+      // every scroll frame, so the cloud now visibly, smoothly tracks the scroll.)
+      // We STILL pause once the hero has fully faded out below the fold
+      // (canvasOpacity ~0 → genuinely nothing on screen to compute for); the
+      // accumulator is capped there so it resumes at the right phase with no jump.
+      const computePaused = canvasOpacity <= 0.001;
       const doCompute = !computePaused && computeAccum >= simInterval;
       if (doCompute) {
         // Sim delta capped at simInterval (velocity shader's stable max with its
@@ -653,8 +628,6 @@ export function heroField(handle: SceneHandle) {
   });
 
   onDispose(() => {
-    if (scrollTimer) clearTimeout(scrollTimer);
-    window.removeEventListener('scroll', onScroll);
     geo.dispose();
     renderMat.dispose();
     targetTex?.dispose();
