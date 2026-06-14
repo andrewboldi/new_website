@@ -312,16 +312,28 @@ function governorTick(frameMs: number) {
 /** Number of full-rate scenes (rest are throttled). Tunable budget. */
 const FULL_RATE_BUDGET = 2;
 
+// ZERO-ALLOC scheduler scratch: assignStrides() runs EVERY rAF. A fresh `live[]`
+// array + a fresh sort-comparator closure per frame were a steady per-frame heap
+// allocation (confirmed by a sampling heap profile: the scheduler hot path was a
+// top site-code allocator, feeding the minor-GC sawtooth that surfaced as
+// periodic frame-time spikes). Both are now hoisted/reused: the array is filled
+// in place (length reset, no realloc once warmed) and the comparator is a single
+// module-scope function. No behavior change — same ranking, same strides.
+const liveScratch: SchedTask[] = [];
+const byPriorityDesc = (a: SchedTask, b: SchedTask) => b.priority() - a.priority();
+
 function assignStrides() {
   // Rank active tasks by priority; the top FULL_RATE_BUDGET render every frame,
   // the next tier every 2nd frame, the rest every 3rd (or 4th when GPU-bound).
   // Only ON-SCREEN tasks compete for the budget — off-screen scenes are frozen
   // (skipped in the loop) so they neither render nor consume a full-rate slot.
-  const live: SchedTask[] = [];
-  for (const tk of tasks) if (tk.active() && tk.onScreen()) live.push(tk);
-  live.sort((a, b) => b.priority() - a.priority());
+  const live = liveScratch;
+  let n = 0;
+  for (const tk of tasks) if (tk.active() && tk.onScreen()) live[n++] = tk;
+  live.length = n; // trim without reallocating the backing store
+  live.sort(byPriorityDesc);
   const farStride = qLevel <= 0.5 ? 5 : qLevel < 1 ? 4 : 3;
-  for (let i = 0; i < live.length; i++) {
+  for (let i = 0; i < n; i++) {
     const tk = live[i];
     if (i < FULL_RATE_BUDGET) tk._stride = 1;
     else if (i < FULL_RATE_BUDGET + 2) tk._stride = 2;

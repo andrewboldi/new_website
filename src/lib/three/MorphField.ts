@@ -242,18 +242,47 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   let oscMix = reduced ? 0 : 1;     // 1 = diffusion owns shape[0], 0 = scroll owns
   const TOP_EPS = 0.012;            // "at the very top" threshold (scroll progress)
 
-  const scrollProgress = () => {
-    // window.scrollY is robust even when `body { overflow-x: hidden }` makes the
-    // body (not documentElement) the scroll container.
-    const max = document.documentElement.scrollHeight - window.innerHeight;
-    return max > 0 ? Math.min(1, Math.max(0, window.scrollY / max)) : 0;
+  // PROFILED ROOT CAUSE of the recurring ~50ms stall (CPU sampling showed this
+  // function as the #1 site self-time hotspot by ~5×, with the GPU idle and the
+  // heap flat — i.e. NOT GC, NOT fill): reading `document.documentElement
+  // .scrollHeight` (and `innerHeight`) every frame forces a SYNCHRONOUS LAYOUT
+  // reflow whenever the layout is dirty. On a page whose other rAF work touches
+  // the DOM, that reflow randomly costs tens of ms, surfacing as the irregular
+  // frame-time spikes on home AND about.
+  //
+  // FIX: cache the scrollable height. `window.scrollY` is cheap (no reflow) and
+  // stays per-frame; the reflow-triggering `scrollHeight`/`innerHeight` are read
+  // only when the layout can actually have changed — on resize/scroll (passive)
+  // and, as a self-heal for late content/font/image reflows, at most a few times
+  // per second behind a time gate. So the hot loop does ZERO forced layout.
+  let scrollMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  let lastMaxRead = 0; // perf.now() of the last scrollHeight read (lazy refresh gate)
+  const refreshScrollMax = () => {
+    scrollMax = Math.max(0, document.documentElement.scrollHeight - window.innerHeight);
+  };
+  // A scroll can reveal/relayout content (sticky headers, lazy media); arm the
+  // cached extent for a refresh on scroll too — but it's still debounced via the
+  // time gate below, so we never reflow more than ~3×/sec however fast they scroll.
+  const armScrollMax = () => { lastMaxRead = 0; };
+  window.addEventListener('resize', refreshScrollMax, { passive: true });
+  window.addEventListener('scroll', armScrollMax, { passive: true });
+  const scrollProgress = (nowMs: number) => {
+    // Self-healing lazy refresh: re-read the (reflow-triggering) extent at most
+    // every ~333ms, so a layout change that didn't fire resize still gets picked
+    // up without paying a per-frame reflow.
+    if (nowMs - lastMaxRead > 333) { lastMaxRead = nowMs; refreshScrollMax(); }
+    // window.scrollY is cheap + robust even when `body { overflow-x: hidden }`
+    // makes the body (not documentElement) the scroll container.
+    return scrollMax > 0 ? Math.min(1, Math.max(0, window.scrollY / scrollMax)) : 0;
   };
 
   onFrame((t, dt) => {
     mat.uniforms.uTime.value = t;
 
-    // ease toward the real scroll position (tight enough to track, smooth enough to glide)
-    progress += (scrollProgress() - progress) * Math.min(1, dt * 5);
+    // ease toward the real scroll position (tight enough to track, smooth enough
+    // to glide). `t` is seconds since the scene started; pass ms for the lazy
+    // reflow-refresh gate inside scrollProgress (keeps the hot loop reflow-free).
+    progress += (scrollProgress(t * 1000) - progress) * Math.min(1, dt * 5);
 
     const span = stages.length - 1;
     const sf = progress * span;
@@ -363,6 +392,8 @@ export function morphField(handle: SceneHandle, opts: Opts = {}) {
   });
 
   onDispose(() => {
+    window.removeEventListener('resize', refreshScrollMax);
+    window.removeEventListener('scroll', armScrollMax);
     geo.dispose(); mat.dispose();
     edgeGeo.dispose(); edgeMat.dispose();
   });

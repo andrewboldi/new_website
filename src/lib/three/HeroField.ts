@@ -466,8 +466,16 @@ export function heroField(handle: SceneHandle) {
   // Hero scroll forms the molecule. At the very top the cloud swirls (progress
   // small, gently oscillating so it's alive); scrolling down crisps it into the
   // molecule; past the hero it disperses gracefully.
+  //
+  // Cache the viewport height. Reading layout-derived window geometry every frame
+  // can force a synchronous reflow (the profiled cause of the home/about frame
+  // spikes — see MorphField.scrollProgress); `window.scrollY` is cheap and stays
+  // per-frame, but `innerHeight` is cached here and refreshed only on resize so
+  // the hot loop never touches a reflow-triggering property.
+  let vh = window.innerHeight || 1;
+  const onResizeVH = () => { vh = window.innerHeight || 1; };
+  window.addEventListener('resize', onResizeVH, { passive: true });
   const heroProgress = () => {
-    const vh = window.innerHeight || 1;
     const y = window.scrollY;
     // Form EARLY (crisp molecule by ~0.55vh) so it's admired while the hero text
     // is still on screen; hold formed; then disperse back to a cloud past ~1.2vh.
@@ -481,12 +489,17 @@ export function heroField(handle: SceneHandle) {
   // page-wide MorphBackground — no double compositing / clutter).
   const canvas = renderer.domElement;
   const heroOpacity = () => {
-    const vh = window.innerHeight || 1;
     const y = window.scrollY;
     return Math.min(1, Math.max(0, 1 - (y - vh * 1.25) / (vh * 0.5)));
   };
 
   let progress = reduced ? 1 : 0;
+  // Cache the last canvas opacity we wrote so the per-frame update can skip the
+  // DOM write (and the `.toFixed(3)` STRING allocation it required) whenever the
+  // value is unchanged — which is the common idle case, where opacity is pinned
+  // at 1 above the fold. `.toFixed` allocated a fresh string every single frame;
+  // gating it removes that from the home-path hot loop (zero per-frame alloc).
+  let lastCanvasOpacity = -1;
 
   /* --------------------- adaptive quality (governor) -------------------- */
   // The hero always renders at full rate, so it carries a steady GPU cost. When
@@ -641,11 +654,19 @@ export function heroField(handle: SceneHandle) {
     group.rotation.y += delta * 0.06;
     group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, ctx.pointer.y * 0.12 - formProgress * 0.1, 0.04);
 
-    // fade the fixed canvas out as the hero leaves (avoids overlaying lower sections)
-    canvas.style.opacity = canvasOpacity.toFixed(3);
+    // fade the fixed canvas out as the hero leaves (avoids overlaying lower
+    // sections). Only touch the DOM + allocate the string when the value moved
+    // by a perceptible amount (quantized to 1e-3 — the old toFixed(3) precision),
+    // so the steady above-the-fold idle case writes nothing and allocates nothing.
+    const qOpacity = Math.round(canvasOpacity * 1000) / 1000;
+    if (qOpacity !== lastCanvasOpacity) {
+      lastCanvasOpacity = qOpacity;
+      canvas.style.opacity = String(qOpacity);
+    }
   });
 
   onDispose(() => {
+    window.removeEventListener('resize', onResizeVH);
     geo.dispose();
     renderMat.dispose();
     targetTex?.dispose();
