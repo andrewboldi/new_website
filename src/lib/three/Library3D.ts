@@ -801,8 +801,12 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   // (at the frame its progress first reaches 1), not every frame after.
   let readyFired = false;
 
+  // The shared GL canvas is fixed + pointer-events:none, so interaction binds to
+  // the scene's HOST element (it overlays this scene's exact screen rect and DOES
+  // receive events). Raycasting reads the host's rect — identical to the rect the
+  // scene is rendered into.
   const onMove = (e: PointerEvent) => {
-    const r = renderer.domElement.getBoundingClientRect();
+    const r = ctx.host.getBoundingClientRect();
     ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -(((e.clientY - r.top) / r.height) * 2 - 1));
   };
   const setSel = (i: number) => {
@@ -819,8 +823,8 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     if (selected >= 0) { if (hovered >= 0 && hovered !== selected) setSel(hovered); else setSel(-1); }
     else if (hovered >= 0) setSel(hovered);
   };
-  renderer.domElement.addEventListener('pointermove', onMove);
-  renderer.domElement.addEventListener('click', onClick);
+  ctx.host.addEventListener('pointermove', onMove);
+  ctx.host.addEventListener('click', onClick);
   const onExternal = (e: Event) => setSel((e as CustomEvent).detail);
   window.addEventListener('book:set', onExternal);
 
@@ -832,7 +836,7 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
     if (hit) { let o: THREE.Object3D | null = hit.object; while (o && o.userData.index === undefined) o = o.parent; if (o) h = o.userData.index; }
     const hoverChanged = h !== hovered; // hover enter/leave kicks off an easing motion
     hovered = h;
-    renderer.domElement.style.cursor = hovered >= 0 || open ? 'pointer' : 'default';
+    ctx.host.style.cursor = hovered >= 0 || open ? 'pointer' : 'default';
     // A new hover (or un-hover) starts a short ease that moves geometry — refresh
     // the shadow for a couple of frames so the contact shadow tracks the lift.
     if (hoverChanged) markShadowDirty(2);
@@ -892,8 +896,8 @@ export function library3D(handle: SceneHandle, payload: { books: BookData[]; wri
   });
 
   onDispose(() => {
-    renderer.domElement.removeEventListener('pointermove', onMove);
-    renderer.domElement.removeEventListener('click', onClick);
+    ctx.host.removeEventListener('pointermove', onMove);
+    ctx.host.removeEventListener('click', onClick);
     window.removeEventListener('book:set', onExternal);
     items.forEach((it) => { it.textures.forEach((t) => t.dispose()); it.mats.forEach((m) => m.dispose()); });
     extra.tex.forEach((t) => t.dispose()); extra.mat.forEach((m) => m.dispose());

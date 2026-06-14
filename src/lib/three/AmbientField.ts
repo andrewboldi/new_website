@@ -124,7 +124,7 @@ const FS = /* glsl */ `
 
 export function ambientField(handle: SceneHandle) {
   const { ctx, onFrame, onDispose } = handle;
-  const { scene, renderer } = ctx;
+  const { scene } = ctx;
   const reduced = prefersReducedMotion();
 
   const toVec3 = (hex: number) => new THREE.Color(hex).convertSRGBToLinear();
@@ -160,12 +160,12 @@ export function ambientField(handle: SceneHandle) {
   quad.frustumCulled = false;
   scene.add(quad);
 
-  // keep resolution uniform in sync (host resizes are driven by core's RO,
-  // which updates renderer size; we read the live drawing-buffer size here).
-  const size = new THREE.Vector2();
+  // keep resolution uniform in sync. Under the shared renderer each scene draws
+  // into its own rect, so read the scene's CSS rect (ctx.width/height) rather
+  // than the shared canvas size. The fBm only uses this for aspect + grain freq,
+  // so CSS dims are correct (and stable across the RT's internal render scale).
   onFrame((t) => {
-    renderer.getSize(size);
-    uniforms.uResolution.value.set(size.x, size.y);
+    uniforms.uResolution.value.set(ctx.width, ctx.height);
     if (!reduced) uniforms.uTime.value = t;
   });
 

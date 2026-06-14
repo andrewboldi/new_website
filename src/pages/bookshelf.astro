@@ -214,7 +214,7 @@ const payload = { books: shelfData, writings: writingData };
   const el = document.getElementById('library-data');
   const payload = el ? JSON.parse(el.textContent || '{}') : { books: [], writings: [] };
   if (payload.books?.length) {
-    mount('#library', (h) => library3D(h, payload), { bloom: { strength: 0.22, radius: 0.5, threshold: 0.92 } });
+    mount('#library', (h) => library3D(h, payload), { bloom: { strength: 0.22, radius: 0.5, threshold: 0.92 }, shadows: true, solid: true });
   }
 
   // ---- essay reader — the modal IS an unrolling parchment scroll ----

@@ -1,27 +1,43 @@
 /**
- * Shared three.js scene scaffolding.
+ * Shared three.js scene scaffolding — SINGLE-CONTEXT architecture.
  *
  * Every scene on the site is a small module that receives a host <div>, builds
- * its world, and returns nothing — lifecycle (RAF, resize, visibility pause,
+ * its world into `ctx.scene`, and animates in `onFrame` — it does NOT render
+ * itself (core renders it). Lifecycle (RAF, resize, visibility pause,
  * reduced-motion, dispose) is handled here so individual scenes stay focused.
  *
- * PERFORMANCE ARCHITECTURE (added for the multi-scene pages, e.g. About ~10
- * canvases at once):
- *  - A single MODULE-LEVEL scheduler drives every active scene from ONE rAF.
- *    Each scene gets a priority from its on-screen prominence (Intersection
- *    Observer ratio × canvas area). Only the most-prominent 1–2 scenes render
- *    at full 60fps; the rest are throttled (render every 2nd/3rd/… frame) or
- *    frozen to their last frame when far off-screen. Every scene keeps its LOOK
- *    — background scenes just update less often.
- *  - Per-scene QUALITY TIERS pick the post chain: hero/feature scenes get the
- *    full composer (bloom + filmic finish + SMAA + output); the many small TILE
- *    scenes get a cheap chain (single bloom pass → output, no SMAA/no finish),
- *    or a direct render — emissive compensation in registry keeps tiles glowing
- *    rather than dim.
- *  - An adaptive GOVERNOR samples a global rolling frame time and, when GPU
- *    bound, steps quality down (drops the finish+SMAA passes on feature scenes,
- *    lowers pixel ratio, and broadcasts a `quality` signal scenes can read to
- *    cut particle counts); it recovers when frames are fast again.
+ * WHY ONE CONTEXT (the big architectural change):
+ *  A Chrome GPU trace proved the multi-scene lag was GPU command-submission
+ *  thrash from MULTIPLE WebGL contexts (one per scene): `GLContextEGL::
+ *  MakeCurrent` alone was ~625ms switching between per-scene renderers, GPUTask
+ *  56% of wall time, while ANY single scene alone ran a perfect 16.7ms/0 spikes.
+ *  A WebGL context belongs to exactly ONE canvas and cannot be shared across
+ *  canvases, so the only way to one context is the canonical three.js "multiple
+ *  scenes, one renderer" pattern (threejs.org/manual/en/multiple-scenes.html):
+ *
+ *   - ONE module-level WebGLRenderer + ONE <canvas> positioned `fixed; inset:0`
+ *     covering the viewport (pointer-events:none, behind content). It persists
+ *     across SPA navigation; scenes register/unregister against it.
+ *   - Each REGISTERED + on-screen scene reads its host's getBoundingClientRect()
+ *     every frame and is rendered into THAT rect via setViewport + setScissor +
+ *     setScissorTest. In-flow tile hosts move with scroll; fixed hero/bg hosts
+ *     stay — reading the rect live tracks both.
+ *   - PER-SCENE POST: each scene keeps its own EffectComposer (bloom/finish/SMAA
+ *     per tier), but it renders to its OWN WebGLRenderTarget (renderToScreen=
+ *     false) sized to rect × renderScale; we then BLIT that RT's texture into the
+ *     scene's screen rect with a scissored fullscreen-quad (a plain CopyShader,
+ *     no second tone-map). One context, per-scene bloom + resolution scaling +
+ *     no cross-bleed, zero MakeCurrent thrash. RTs are reused (no per-frame alloc).
+ *
+ * PERFORMANCE (preserved from the multi-canvas era):
+ *  - A single MODULE-LEVEL scheduler drives every scene from ONE rAF. Per-scene
+ *    priority (IntersectionObserver ratio × area) picks cadence: the top 1–2
+ *    scenes render every frame, the rest are throttled (every 2nd/3rd/…), and
+ *    OFF-SCREEN scenes are skipped wholesale (no sim, no render, no composite).
+ *  - Per-scene QUALITY TIERS pick the post chain (hero/feature = full composer;
+ *    tile = cheap bloom→output). An adaptive GOVERNOR samples a global rolling
+ *    frame time and steps quality down when GPU-bound (drops finish+SMAA, lowers
+ *    pixel ratio, broadcasts a `quality` signal scenes can read to cut work).
  */
 import * as THREE from 'three';
 import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer.js';
@@ -30,6 +46,8 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { ShaderPass } from 'three/examples/jsm/postprocessing/ShaderPass.js';
 import { SMAAPass } from 'three/examples/jsm/postprocessing/SMAAPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { CopyShader } from 'three/examples/jsm/shaders/CopyShader.js';
+import { FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 
 /**
  * Combined filmic-finish pass (one fullscreen draw, runs in LINEAR space before
@@ -125,6 +143,7 @@ export type SceneTier = 'hero' | 'feature' | 'tile';
 export interface SceneContext {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
+  /** the SHARED renderer (one per page) */
   renderer: THREE.WebGLRenderer;
   composer: EffectComposer | null;
   host: HTMLElement;
@@ -162,25 +181,22 @@ export interface CreateSceneOpts {
   alpha?: boolean;
   /** add an UnrealBloom composer chain */
   bloom?: { strength?: number; radius?: number; threshold?: number } | false;
-  /** clear color when not alpha */
+  /** clear color when not alpha (per-scene background fill, drawn into its rect) */
   clearColor?: number;
   /** render a single static frame even under reduced motion (default true) */
   staticFallback?: boolean;
-  /** cap the device pixel ratio (cheaper for large/background canvases) */
+  /** cap the device pixel ratio (cheaper for large/background regions) */
   maxPixelRatio?: number;
   /**
-   * Internal RENDER SCALE in (0..1] — render the drawing buffer at this fraction
-   * of CSS resolution and let CSS upscale the canvas to 100% (three.js sets the
-   * canvas style to the CSS size, the buffer to size×pixelRatio, so a sub-1.0
-   * effective pixel ratio = fewer pixels, stretched). On a hi-DPI display fill
+   * Internal RENDER SCALE in (0..1] — render this scene's composer target at this
+   * fraction of its CSS rect, then upscale on blit. On a hi-DPI display fill
    * scales with pixel COUNT, so this is the single biggest lever for FULLSCREEN
    * scenes (the hero cloud + the page-wide fBm/molecular backgrounds): a soft,
    * glowy, blurred field upscales nearly invisibly but costs 2–4× less to fill.
    *
    * Default 1.0 (small tile/feature scenes render crisp at native). Fullscreen
    * scenes should pass ~0.5–0.66. The governor multiplies this DOWN further under
-   * load (see applyPixelRatio's loadScale) — fullscreen scenes can reach ~0.4×.
-   * The effective pixel ratio is floored at 0.4 so it never gets mushy.
+   * load. The effective pixel ratio is floored at 0.4 so it never gets mushy.
    */
   renderScale?: number;
   /**
@@ -195,16 +211,215 @@ export interface CreateSceneOpts {
    *              compensation lives in the scene/registry so tiles still glow.
    */
   tier?: SceneTier;
+  /** scene needs shadow maps (the bookshelf). Enables shadowMap on the shared renderer. */
+  shadows?: boolean;
+  /**
+   * COMPOSITE MODE on the shared canvas:
+   *  - default (false): ADDITIVE — the scene's light is added over the background
+   *    (the glowing molecular/particle aesthetic: sparse bright geometry on a
+   *    transparent RT, dark pixels let the background show through). Correct for
+   *    nearly every scene.
+   *  - true: SOLID — standard premultiplied "over" so opaque lit geometry occludes
+   *    what's behind it (the bookshelf, the ball-and-stick molecule, the piano,
+   *    the Rubik's cube — solid objects, not additive glow).
+   */
+  solid?: boolean;
+  /**
+   * COMPOSITE LAYER (z-order on the shared canvas). Lower = further back. The
+   * fullscreen BACKGROUND fields (hero cloud, morph field, ambient fBm) pass 0 so
+   * they paint UNDER everything; in-flow CONTENT scene tiles use the default 1 and
+   * draw on top within their rects. Defaults to 0 for hosts that are CSS
+   * position:fixed (the backgrounds) and 1 otherwise, so callers rarely set it.
+   */
+  layer?: number;
+}
+
+/* ────────────────────────────────────────────────────────────────────────────
+ *  SHARED RENDERER SINGLETON
+ *  One WebGLRenderer + one fixed full-viewport canvas for the whole page. A
+ *  WebGL context cannot be shared across canvases, so this single canvas is the
+ *  only way every scene lives on ONE GL context (killing the MakeCurrent thrash).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+interface Shared {
+  renderer: THREE.WebGLRenderer;
+  canvas: HTMLCanvasElement;
+  /** CSS pixel size of the canvas (viewport). */
+  cssW: number;
+  cssH: number;
+  /** fullscreen-quads used to blit each scene's RT into its screen rect. */
+  blitQuad: FullScreenQuad;       // premultiplied "over" — opaque scenes
+  blitMat: THREE.ShaderMaterial;
+  blitAddQuad: FullScreenQuad;    // additive — transparent/glowing scenes
+  blitAddMat: THREE.ShaderMaterial;
+  /** shared CopyShader uniforms (tDiffuse) used by both blit quads. */
+  blitUniforms: typeof CopyShader.uniforms;
+  /** does any registered scene want shadows? */
+  shadowWanted: boolean;
+}
+
+let shared: Shared | null = null;
+
+/** Base device-pixel-ratio cap for the SHARED canvas buffer. Per-scene render
+ *  scale shrinks each scene's RT below this; the canvas itself blits at this. */
+const CANVAS_DPR_CAP = 2;
+
+function canvasDpr() {
+  return Math.min(typeof devicePixelRatio !== 'undefined' ? devicePixelRatio : 1, CANVAS_DPR_CAP);
+}
+
+function ensureShared(): Shared {
+  if (shared) return shared;
+
+  const canvas = document.createElement('canvas');
+  canvas.id = 'gl-shared';
+  // Fixed, full-viewport, behind content, never intercepts pointer events.
+  Object.assign(canvas.style, {
+    position: 'fixed',
+    inset: '0',
+    width: '100%',
+    height: '100%',
+    display: 'block',
+    pointerEvents: 'none',
+    zIndex: '0',
+  } as CSSStyleDeclaration);
+  document.body.appendChild(canvas);
+
+  const renderer = new THREE.WebGLRenderer({
+    canvas,
+    antialias: false, // SMAA is applied per-scene in the composer where needed
+    alpha: true, // page content / mood layer shows through transparent regions
+    powerPreference: 'high-performance',
+    premultipliedAlpha: true,
+  });
+  const cssW = window.innerWidth || 1;
+  const cssH = window.innerHeight || 1;
+  renderer.setPixelRatio(canvasDpr());
+  renderer.setSize(cssW, cssH, false);
+  renderer.autoClear = false; // we clear the whole canvas ONCE per frame ourselves
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.toneMappingExposure = 1.0;
+  renderer.setClearColor(0x000000, 0);
+
+  // Blit materials — copy each scene's RT (already tone-mapped + sRGB-encoded by
+  // its OutputPass; NO second conversion here) onto the shared canvas. The canvas
+  // is `alpha:true`, so the BROWSER composites it over the page (mood layer + body
+  // gradient) using the canvas ALPHA — which means the blit must write a sensible
+  // alpha, not just RGB, or bright-but-sparse pixels would be composited away.
+  //
+  //  • ADDITIVE (transparent/glowing scenes — backgrounds + molecular tiles +
+  //    feature scenes): the scene drew its light additively onto a transparent RT,
+  //    so the RT IS accumulated light. We ADD that rgb over whatever's already on
+  //    the canvas (e.g. the morph field) AND raise the canvas alpha to the pixel's
+  //    luminance, so a thin bright Fourier phasor / Three-body trail stays visible
+  //    over the dark page instead of being discarded as near-transparent. Dark
+  //    scene pixels (rgb≈0 → alpha≈0) leave the background showing through. This
+  //    reproduces the old per-canvas "additive scene over the field" look.
+  //  • OVER (solid scenes — piano, bookshelf, ball-and-stick molecule, Rubik's):
+  //    standard straight-alpha over; the RT's own alpha (1 on opaque geometry)
+  //    occludes the background.
+  const blitVert = CopyShader.vertexShader;
+  const blitFragOver = /* glsl */ `
+    uniform float opacity; uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main() { gl_FragColor = texture2D(tDiffuse, vUv) * opacity; }
+  `;
+  const blitFragAdd = /* glsl */ `
+    uniform float opacity; uniform sampler2D tDiffuse; varying vec2 vUv;
+    void main() {
+      vec4 c = texture2D(tDiffuse, vUv);
+      // canvas alpha = perceived brightness so glow shows over the page; rgb adds.
+      float a = clamp(max(c.r, max(c.g, c.b)), 0.0, 1.0);
+      gl_FragColor = vec4(c.rgb * opacity, a * opacity);
+    }
+  `;
+  const blitUniforms = THREE.UniformsUtils.clone(CopyShader.uniforms);
+  const blitMat = new THREE.ShaderMaterial({
+    uniforms: blitUniforms,
+    vertexShader: blitVert,
+    fragmentShader: blitFragOver,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.SrcAlphaFactor,
+    blendDst: THREE.OneMinusSrcAlphaFactor,       // straight-alpha "over" for rgb
+    blendEquationAlpha: THREE.AddEquation,
+    blendSrcAlpha: THREE.OneFactor,
+    blendDstAlpha: THREE.OneMinusSrcAlphaFactor,  // canvas alpha builds toward opaque
+  });
+  const blitAddMat = new THREE.ShaderMaterial({
+    uniforms: blitUniforms, // SHARED uniforms (same tDiffuse set per scene per frame)
+    vertexShader: blitVert,
+    fragmentShader: blitFragAdd,
+    transparent: true,
+    depthTest: false,
+    depthWrite: false,
+    blending: THREE.CustomBlending,
+    blendEquation: THREE.AddEquation,
+    blendSrc: THREE.OneFactor,
+    blendDst: THREE.OneFactor,                    // additive rgb: dst.rgb += src.rgb
+    blendEquationAlpha: THREE.AddEquation,
+    blendSrcAlpha: THREE.OneFactor,
+    blendDstAlpha: THREE.OneFactor,               // additive alpha: dst.a += lum
+  });
+  const blitQuad = new FullScreenQuad(blitMat);
+  const blitAddQuad = new FullScreenQuad(blitAddMat);
+
+  shared = { renderer, canvas, cssW, cssH, blitQuad, blitMat, blitAddQuad, blitAddMat, blitUniforms, shadowWanted: false };
+
+  // Keep the canvas sized to the viewport. Scenes read their own rects each
+  // frame, so we only need the canvas itself to match the viewport.
+  window.addEventListener('resize', onSharedResize, { passive: true });
+
+  if (import.meta.env.DEV && typeof window !== 'undefined') {
+    (window as unknown as { __glShared: () => unknown }).__glShared = () => ({
+      contexts: 1,
+      cssW: shared?.cssW,
+      cssH: shared?.cssH,
+      pixelRatio: shared?.renderer.getPixelRatio(),
+      scenes: tasks.size,
+      shadows: shared?.shadowWanted,
+    });
+  }
+  return shared;
+}
+
+let sharedResizeRAF = 0;
+function onSharedResize() {
+  cancelAnimationFrame(sharedResizeRAF);
+  sharedResizeRAF = requestAnimationFrame(() => {
+    if (!shared) return;
+    shared.cssW = window.innerWidth || 1;
+    shared.cssH = window.innerHeight || 1;
+    shared.renderer.setPixelRatio(canvasDpr());
+    shared.renderer.setSize(shared.cssW, shared.cssH, false);
+  });
+}
+
+/** Tear the shared renderer + canvas down (SPA leave / no scenes left). */
+function disposeShared() {
+  if (!shared) return;
+  window.removeEventListener('resize', onSharedResize);
+  cancelAnimationFrame(sharedResizeRAF);
+  try { shared.blitQuad.dispose(); } catch { /* noop */ }
+  try { shared.blitAddQuad.dispose(); } catch { /* noop */ }
+  try { shared.blitMat.dispose(); } catch { /* noop */ }
+  try { shared.blitAddMat.dispose(); } catch { /* noop */ }
+  try { shared.renderer.dispose(); } catch { /* noop */ }
+  shared.renderer.forceContextLoss?.();
+  shared.canvas.remove();
+  shared = null;
 }
 
 /* ────────────────────────────────────────────────────────────────────────────
  *  MODULE-LEVEL SCHEDULER + GOVERNOR
  *  One rAF drives all scenes. Per-scene priority decides render cadence so N
- *  visible canvases no longer cost N× full renders every frame.
+ *  visible scenes no longer cost N× full renders every frame.
  * ────────────────────────────────────────────────────────────────────────── */
 
 interface SchedTask {
-  /** advance simulation + (maybe) render. Returns true if it actually rendered. */
+  /** advance simulation + (maybe) render. Returns nothing; renders via compositor. */
   step: (t: number, dt: number, render: boolean) => void;
   /** prominence in [0..1]: intersectionRatio × normalized canvas area. */
   priority: () => number;
@@ -213,13 +428,17 @@ interface SchedTask {
   /**
    * HARD FREEZE: true while the scene is intersecting the viewport (even a sliver).
    * When false the scheduler skips the task ENTIRELY — no frame callbacks, no
-   * simulation, no render — so an off-screen scene costs ~0 (this is what takes a
-   * 10-canvas page down to the 1–2 scenes actually on screen). The task's own
-   * `step` advances its clock by a capped dt on the first frame back so the
-   * animation resumes where it left off instead of jumping forward by the whole
-   * time it spent off-screen.
+   * simulation, no render — so an off-screen scene costs ~0.
    */
   onScreen: () => boolean;
+  /**
+   * COMPOSITE LAYER (z-order). Scenes are blitted onto the ONE shared canvas in
+   * ascending layer order each frame, so a fullscreen BACKGROUND field (layer 0)
+   * is painted first and in-flow CONTENT tiles (layer 1, default) draw ON TOP of
+   * it within their rects. Without this a fullscreen background blitted after a
+   * tile would overpaint the tile's region (its scissor is the whole viewport).
+   */
+  layer: number;
   /** stride bucket for throttled scenes (filled by the scheduler each frame). */
   _stride: number;
   _phase: number;
@@ -229,26 +448,15 @@ const tasks = new Set<SchedTask>();
 let schedRAF = 0;
 let frameIndex = 0;
 
-// Lightweight instrumentation: total number of ACTUAL scene renders performed
-// (composer.render / renderer.render). One integer add per render — negligible.
-// Exposed on window so perf tooling can sample renders/sec; this is the quantity
-// the scheduler exists to cut (N visible scenes no longer = N renders/frame).
+// Lightweight instrumentation: total number of ACTUAL scene composites performed.
 let sceneRenderCount = 0;
 let schedTicks = 0; // number of scheduler-loop iterations (detects rAF starvation)
-// Dev-only perf hooks (tree-shaken from production via import.meta.env.DEV): let
-// tooling sample renders/sec, scheduler tick rate, the stride histogram, and the
-// governor's current quality. The two counters above are plain integer adds in
-// the hot path (negligible) and stay in all builds; only the window surface is
-// gated so production ships nothing extra.
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as unknown as { __sceneRenderCount: () => number }).__sceneRenderCount = () => sceneRenderCount;
   (window as unknown as { __sceneStats: () => unknown }).__sceneStats = () => {
-    // Stride histogram across active scenes: how many render every frame (full
-    // rate) vs throttled. Proves the scheduler caps full-rate work regardless of
-    // how many scenes are visible.
     const strides: Record<number, number> = {};
-    let active = 0; // on-screen AND ticking (the only scenes doing per-frame work)
-    let offscreen = 0; // registered but frozen (skipped wholesale by the scheduler)
+    let active = 0;
+    let offscreen = 0;
     for (const tk of tasks) {
       if (!tk.active() || !tk.onScreen()) { offscreen++; continue; }
       active++;
@@ -257,12 +465,13 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     return {
       renders: sceneRenderCount,
       schedTicks,
-      activeScenes: active, // scenes actually running onFrame + maybe rendering
-      offscreenScenes: offscreen, // frozen scenes (proof: these cost ~0)
+      activeScenes: active,
+      offscreenScenes: offscreen,
       totalScenes: tasks.size,
+      contexts: shared ? 1 : 0,
       quality: qLevel,
       avgFrameMs: avgFrame,
-      strideHistogram: strides, // e.g. {1:2, 2:2, 3:8} = 2 full, 2 half, 8 third-rate
+      strideHistogram: strides,
     };
   };
 }
@@ -273,8 +482,6 @@ const qSubs = new Set<(q: number) => void>();
 let avgFrame = 16.7; // rolling average frame time (ms)
 let slowAccum = 0; // ms spent "slow" (debounce stepping down)
 let fastAccum = 0; // ms spent "fast" (debounce stepping up)
-// Thresholds: step DOWN when sustained avg > 22ms (~45fps); step UP when
-// sustained avg < 15ms (~66fps). Hysteresis via the accum debounce windows.
 const SLOW_MS = 22;
 const FAST_MS = 15;
 const STEP_DEBOUNCE = 600; // ms a condition must persist before we change qLevel
@@ -287,8 +494,6 @@ function setQuality(next: number) {
 }
 
 function governorTick(frameMs: number) {
-  // EMA of frame time; ignore absurd spikes (tab refocus, GC) so one hitch
-  // doesn't yank quality.
   if (frameMs > 0 && frameMs < 500) avgFrame += (frameMs - avgFrame) * 0.1;
 
   const idx = Q_STEPS.indexOf(qLevel);
@@ -312,21 +517,14 @@ function governorTick(frameMs: number) {
 /** Number of full-rate scenes (rest are throttled). Tunable budget. */
 const FULL_RATE_BUDGET = 2;
 
-// ZERO-ALLOC scheduler scratch: assignStrides() runs EVERY rAF. A fresh `live[]`
-// array + a fresh sort-comparator closure per frame were a steady per-frame heap
-// allocation (confirmed by a sampling heap profile: the scheduler hot path was a
-// top site-code allocator, feeding the minor-GC sawtooth that surfaced as
-// periodic frame-time spikes). Both are now hoisted/reused: the array is filled
-// in place (length reset, no realloc once warmed) and the comparator is a single
-// module-scope function. No behavior change — same ranking, same strides.
 const liveScratch: SchedTask[] = [];
 const byPriorityDesc = (a: SchedTask, b: SchedTask) => b.priority() - a.priority();
+// Separate scratch + comparator for the per-frame LAYER-ordered render pass
+// (kept distinct from assignStrides' priority sort so neither clobbers the other).
+const renderScratch: SchedTask[] = [];
+const byLayerAsc = (a: SchedTask, b: SchedTask) => a.layer - b.layer;
 
 function assignStrides() {
-  // Rank active tasks by priority; the top FULL_RATE_BUDGET render every frame,
-  // the next tier every 2nd frame, the rest every 3rd (or 4th when GPU-bound).
-  // Only ON-SCREEN tasks compete for the budget — off-screen scenes are frozen
-  // (skipped in the loop) so they neither render nor consume a full-rate slot.
   const live = liveScratch;
   let n = 0;
   for (const tk of tasks) if (tk.active() && tk.onScreen()) live[n++] = tk;
@@ -352,15 +550,38 @@ function schedulerLoop(now: number) {
   governorTick(frameMs);
   assignStrides();
 
+  const sh = shared;
+  // Clear the whole shared canvas ONCE per frame (scissor OFF so it clears the
+  // full framebuffer, not just the last scene's rect). autoClear is false.
+  if (sh) {
+    sh.renderer.setRenderTarget(null);
+    sh.renderer.setScissorTest(false);
+    sh.renderer.clear(true, true, true);
+  }
+
   const t = now / 1000;
   const dt = Math.min(frameMs / 1000, 0.05);
+  // Build the active list and render in ascending LAYER order so background
+  // fields composite UNDER content tiles on the single shared canvas (a
+  // fullscreen background blitted after a tile would otherwise overpaint it).
+  const order = renderScratch;
+  let m = 0;
   for (const tk of tasks) {
-    // HARD FREEZE: an off-screen (non-intersecting) scene is skipped wholesale —
-    // no simulation, no render, fully idle. `active()` also covers document.hidden.
     if (!tk.active() || !tk.onScreen()) continue;
+    order[m++] = tk;
+  }
+  order.length = m;
+  // Stable-ish sort by layer only (preserves Set order within a layer, which is
+  // mount order — fine for same-layer siblings that don't overlap).
+  order.sort(byLayerAsc);
+  for (let i = 0; i < m; i++) {
+    const tk = order[i];
     const render = (frameIndex % tk._stride) === tk._phase % tk._stride;
     tk.step(t, dt, render);
   }
+
+  // Leave the renderer in a clean state for the next frame / any external GL use.
+  if (sh) sh.renderer.setScissorTest(false);
   frameIndex++;
 }
 
@@ -385,72 +606,103 @@ function removeTask(tk: SchedTask) {
   }
 }
 
-/**
- * Bootstraps a renderer + scene + camera sized to `host`, registers itself with
- * the shared scheduler, pauses when scrolled off-screen, and respects
- * reduced-motion.
- */
+/* ────────────────────────────────────────────────────────────────────────────
+ *  createScene — registers a scene against the shared renderer.
+ * ────────────────────────────────────────────────────────────────────────── */
+
 export function createScene(opts: CreateSceneOpts): SceneHandle {
   const { host } = opts;
   const reduced = prefersReducedMotion();
   const tier: SceneTier = opts.tier ?? 'feature';
 
-  const width = host.clientWidth || 1;
-  const height = host.clientHeight || 1;
+  const sh = ensureShared();
+  if (opts.shadows) {
+    sh.shadowWanted = true;
+    sh.renderer.shadowMap.enabled = true;
+  }
+  const renderer = sh.renderer;
+
+  // Composite layer: explicit opts.layer wins; otherwise fixed-position hosts are
+  // backgrounds (layer 0, painted first/under), everything else is content (10).
+  // The gap (0..10) lets fixed background fields stack among themselves (ambient
+  // 0 < morph 1 < hero 2) while always staying under in-flow content tiles.
+  let layer = opts.layer;
+  if (layer === undefined) {
+    let fixed = false;
+    try { fixed = getComputedStyle(host).position === 'fixed'; } catch { /* noop */ }
+    layer = fixed ? 0 : 10;
+  }
 
   // Per-tier pixel-ratio cap (tiles ≤1, feature ≤1.5, hero ≤2). An explicit
   // opts.maxPixelRatio still wins so callers can override.
   const tierCap = tier === 'tile' ? 1 : tier === 'hero' ? 2 : 1.5;
   const baseCap = opts.maxPixelRatio ?? tierCap;
-  // Internal render scale (fraction of CSS resolution the buffer is rendered at;
-  // CSS upscales). Default 1.0 = native; fullscreen scenes pass ~0.5–0.66 to cut
-  // fill on hi-DPI displays. Clamped to (0..1] so it can only ever REDUCE pixels.
+  // Internal render scale (fraction of CSS rect the scene's RT is rendered at;
+  // the blit upscales). Default 1.0 = native; fullscreen scenes pass ~0.5–0.66.
   const renderScale = Math.min(1, Math.max(0.1, opts.renderScale ?? 1));
+  // SOLID scenes (opaque lit geometry, or explicitly opts.solid) blit with
+  // premultiplied "over" so they occlude; everything else ADDS its glow over the
+  // background — the molecular/additive aesthetic, and the only mode that keeps
+  // sparse glowing scenes (thin Fourier phasors, Three-body trails) visible.
+  const isOpaque = opts.solid === true || !(opts.alpha ?? true);
 
-  const renderer = new THREE.WebGLRenderer({
-    // Native MSAA only matters when rendering straight to screen (tiles with no
-    // composer). The full composer adds SMAA instead, so AA there is redundant.
-    antialias: tier === 'tile' || !opts.bloom,
-    alpha: opts.alpha ?? true,
-    powerPreference: 'high-performance',
-  });
-  let curPixelRatio = Math.min(devicePixelRatio, baseCap) * renderScale;
-  renderer.setPixelRatio(curPixelRatio);
-  renderer.setSize(width, height);
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.0;
-  if (!(opts.alpha ?? true)) renderer.setClearColor(opts.clearColor ?? PALETTE.bg, 1);
-  host.appendChild(renderer.domElement);
+  // Initial CSS rect from the host (fallback to 1px so nothing divides by zero).
+  const rect0 = host.getBoundingClientRect();
+  let cssW = Math.max(1, Math.round(rect0.width) || host.clientWidth || 1);
+  let cssH = Math.max(1, Math.round(rect0.height) || host.clientHeight || 1);
 
   const scene = new THREE.Scene();
-  const camera = new THREE.PerspectiveCamera(opts.fov ?? 55, width / height, 0.1, 4000);
+  const camera = new THREE.PerspectiveCamera(opts.fov ?? 55, cssW / cssH, 0.1, 4000);
   camera.position.z = opts.cameraZ ?? 6;
 
-  // ── Post-processing chain, built per tier ───────────────────────────────
+  // Effective device-pixel-ratio for THIS scene's RT: clamp(devicePixelRatio,
+  // baseCap) × renderScale × governor-load-scale, floored at 0.4.
+  let curPixelRatio = Math.min(canvasDpr(), baseCap) * renderScale;
+  // RT buffer dimensions (device pixels).
+  const rtW = () => Math.max(1, Math.round(cssW * curPixelRatio));
+  const rtH = () => Math.max(1, Math.round(cssH * curPixelRatio));
+
+  // ── Per-scene render target + post-processing chain, built per tier ──────
+  // The composer renders into `target` (renderToScreen=false); we blit its
+  // result texture into the scene's screen rect each frame.
+  const target = new THREE.WebGLRenderTarget(rtW(), rtH(), {
+    // 8-bit like the old per-scene canvas (which looked great). Bloom's internal
+    // mip RTs keep their own HDR-ish precision; a HalfFloat final target doubled
+    // RT memory/bandwidth and periodically stalled the weak iGPU's pipeline
+    // (~600ms hitches) for no visible gain, so we match the old format.
+    type: THREE.UnsignedByteType,
+    samples: 0,
+    depthBuffer: true,
+    stencilBuffer: false,
+  });
+  target.texture.colorSpace = THREE.SRGBColorSpace; // OutputPass writes sRGB here
+
   let composer: EffectComposer | null = null;
   let bloomPass: UnrealBloomPass | null = null;
   let finishPass: ShaderPass | null = null;
   let smaaPass: SMAAPass | null = null;
   let renderPass: RenderPass | null = null;
   let outputPass: OutputPass | null = null;
-  // Whether the "premium" finish+SMAA passes are currently enabled (governor may
-  // strip them on feature scenes under load). Tiles never have them.
   let premiumOn = tier !== 'tile';
 
+  // Even tile/no-bloom scenes get a composer (RenderPass → [bloom] → OutputPass)
+  // so EVERYTHING composites through the same RT→blit path. OutputPass applies
+  // tone-map + sRGB ONCE into the RT; the blit is a raw copy.
+  composer = new EffectComposer(renderer, target);
+  composer.renderToScreen = false;
+  renderPass = new RenderPass(scene, camera);
+  // Per-scene background fill (opaque scenes): RenderPass clears the RT with the
+  // scene's clearColor; transparent scenes leave the RT transparent so the page
+  // shows through after the blit.
+  if (!(opts.alpha ?? true)) {
+    scene.background = new THREE.Color(opts.clearColor ?? PALETTE.bg);
+  }
+  composer.addPass(renderPass);
+
   if (opts.bloom) {
-    composer = new EffectComposer(renderer);
-    renderPass = new RenderPass(scene, camera);
-    composer.addPass(renderPass);
-    // Bloom (linear). Default threshold 0.5 so only genuinely bright/emissive
-    // accents glow instead of washing the whole frame to mush.
-    // FILL: UnrealBloom is a multi-pass full-screen blur — the single biggest
-    // post cost on a weak iGPU. Its internal mip pyramid is sized HALF-res here
-    // (the bloom is a soft wide glow, so half-res is visually indistinguishable
-    // but quarters the bloom blur fill). The resolution vec only sets the mip
-    // chain size; the composer still composites it back at full res.
     const bloomRes = new THREE.Vector2(
-      Math.max(1, Math.round(width * 0.5)),
-      Math.max(1, Math.round(height * 0.5)),
+      Math.max(1, Math.round(cssW * 0.5)),
+      Math.max(1, Math.round(cssH * 0.5)),
     );
     bloomPass = new UnrealBloomPass(
       bloomRes,
@@ -459,32 +711,26 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
       opts.bloom.threshold ?? 0.5,
     );
     composer.addPass(bloomPass);
-
-    if (tier === 'tile') {
-      // CHEAP path: bloom → output only. No filmic finish, no SMAA fullscreen
-      // pass. Tiles rely on emissive/threshold tuning (registry) to still glow.
-      outputPass = new OutputPass();
-      composer.addPass(outputPass);
-    } else {
-      // FULL path (hero/feature): vignette+grain+dither, then SMAA, then output.
-      finishPass = new ShaderPass(FilmicFinishShader);
-      finishPass.uniforms.uResolution.value.set(width, height);
-      composer.addPass(finishPass);
-      smaaPass = new SMAAPass();
-      composer.addPass(smaaPass);
-      outputPass = new OutputPass();
-      composer.addPass(outputPass);
-    }
   }
 
-  // Rebuild the pass list when the governor toggles premium quality on a feature
-  // scene. Cheaper than per-frame `pass.enabled` because EffectComposer still
-  // copies through disabled passes; we drop them from the chain entirely.
+  if (tier !== 'tile') {
+    // FULL path (hero/feature): vignette+grain+dither, then SMAA.
+    finishPass = new ShaderPass(FilmicFinishShader);
+    finishPass.uniforms.uResolution.value.set(cssW, cssH);
+    composer.addPass(finishPass);
+    smaaPass = new SMAAPass();
+    composer.addPass(smaaPass);
+  }
+  outputPass = new OutputPass();
+  composer.addPass(outputPass);
+  composer.setSize(rtW(), rtH());
+
+  // Rebuild the pass list when the governor toggles premium quality.
   const rebuildPasses = () => {
-    if (!composer || tier === 'tile' || !renderPass || !bloomPass || !outputPass) return;
+    if (!composer || !renderPass || !outputPass) return;
     composer.passes.length = 0;
     composer.addPass(renderPass);
-    composer.addPass(bloomPass);
+    if (bloomPass) composer.addPass(bloomPass);
     if (premiumOn && finishPass && smaaPass) {
       composer.addPass(finishPass);
       composer.addPass(smaaPass);
@@ -492,16 +738,12 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     composer.addPass(outputPass);
   };
 
-  // `ticks` counts how many frame callbacks this scene has actually run. It only
-  // increments when the scene is ON-SCREEN and ticked, so a frozen off-screen
-  // scene's counter stays flat — that's the proof the hard-freeze works (perf
-  // tooling samples per-scene ticks via window.__sceneTicks in DEV).
   const ctxState = { quality: qLevel, ticks: 0 };
   const ctx: SceneContext = {
     scene, camera, renderer, composer, host,
     clock: new THREE.Clock(),
     pointer: new THREE.Vector2(0, 0),
-    width, height,
+    width: cssW, height: cssH,
     get quality() { return ctxState.quality; },
   };
 
@@ -512,10 +754,12 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   const onDispose = (cb: () => void) => disposeCbs.push(cb);
   const onQuality = (cb: (q: number) => void) => { qualityCbs.push(cb); cb(ctxState.quality); };
 
-  // ---- pointer (eased toward target) ----
+  // ---- pointer (eased toward target). Read against the host's live rect so a
+  // scene's pointer is correct wherever the host sits on the (scrolling) page. ----
   const targetPointer = new THREE.Vector2(0, 0);
   const onPointer = (e: PointerEvent) => {
     const r = host.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) return;
     targetPointer.set(
       ((e.clientX - r.left) / r.width) * 2 - 1,
       -(((e.clientY - r.top) / r.height) * 2 - 1),
@@ -523,55 +767,43 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   };
   window.addEventListener('pointermove', onPointer, { passive: true });
 
-  // ---- resize ----
-  let resizeRAF = 0;
+  // ---- resize the scene's RT/composer when its CSS rect changes ----
+  // RenderTarget.setSize early-outs when dims are unchanged, so calling these on
+  // an unchanged rect is cheap (a comparison); only an actual change reallocates.
+  const applyRtSize = () => {
+    const w = rtW(), h = rtH();
+    target.setSize(w, h);
+    composer?.setSize(w, h);
+    // composer.setSize resized bloom to full RT res — pull it back to half-res.
+    bloomPass?.setSize(Math.max(1, Math.round(w * 0.5)), Math.max(1, Math.round(h * 0.5)));
+    finishPass?.uniforms.uResolution.value.set(cssW, cssH);
+  };
+
   const applyPixelRatio = () => {
-    // Under load the governor pulls pixel ratio DOWN aggressively — resolution
-    // is the #1 fill lever on a weak iGPU. Tiles too (their full-screen siblings
-    // dominate fill; a tile at 0.8 DPR is still crisp at its small size).
     const loadScale = qLevel >= 1 ? 1 : qLevel >= 0.75 ? 0.8 : qLevel >= 0.5 ? 0.65 : 0.5;
-    // renderScale (the scene's BASE fraction of CSS res) multiplies the governor's
-    // load scale, so a fullscreen scene defaulting to 0.6× drops to ~0.4× under
-    // deep load — the big fill win on a hi-DPI iGPU.
-    const want = Math.min(devicePixelRatio, baseCap) * renderScale * loadScale;
-    // Allow sub-1.0 effective pixel ratio (CSS upscales) — this is where the big
-    // fill wins come from. Floor at 0.4 so it never gets mushy (a soft glowy
-    // fullscreen field upscales fine; the floor protects crisp tiles which keep
-    // renderScale 1.0 and so only reach this floor under the deepest load).
+    const want = Math.min(canvasDpr(), baseCap) * renderScale * loadScale;
     const clamped = Math.max(0.4, want);
     if (Math.abs(clamped - curPixelRatio) > 0.01) {
       curPixelRatio = clamped;
-      renderer.setPixelRatio(clamped);
-      renderer.setSize(ctx.width, ctx.height);
-      composer?.setSize(ctx.width, ctx.height);
-      // composer.setSize resized bloom to full res — pull it back to half-res.
-      bloomPass?.setSize(Math.max(1, Math.round(ctx.width * 0.5)), Math.max(1, Math.round(ctx.height * 0.5)));
-      finishPass?.uniforms.uResolution.value.set(ctx.width, ctx.height);
+      applyRtSize();
     }
   };
-  const ro = new ResizeObserver(() => {
-    cancelAnimationFrame(resizeRAF);
-    resizeRAF = requestAnimationFrame(() => {
-      const w = host.clientWidth || 1;
-      const h = host.clientHeight || 1;
-      ctx.width = w; ctx.height = h;
-      camera.aspect = w / h;
-      camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
-      composer?.setSize(w, h);
-      bloomPass?.setSize(Math.max(1, Math.round(w * 0.5)), Math.max(1, Math.round(h * 0.5)));
-      finishPass?.uniforms.uResolution.value.set(w, h);
-    });
-  });
-  ro.observe(host);
 
-  // ---- visibility + prominence (drives scheduler priority) ----
-  // `visible` is the HARD-FREEZE gate: true the moment any sliver of the host
-  // intersects the viewport, false once it's fully off-screen. An off-screen
-  // scene is skipped entirely by the scheduler (no sim, no render) — see the
-  // scheduler loop's onScreen() check. `wasOnScreen` lets `step` advance the
-  // scene clock by only a capped dt on the first frame back (clean resume, no
-  // jump forward by the whole time spent off-screen).
+  // Recompute the CSS rect from the host. Returns true if it changed.
+  const syncRect = (): boolean => {
+    const r = host.getBoundingClientRect();
+    const w = Math.max(1, Math.round(r.width) || host.clientWidth || 1);
+    const h = Math.max(1, Math.round(r.height) || host.clientHeight || 1);
+    if (w === cssW && h === cssH) return false;
+    cssW = w; cssH = h;
+    ctx.width = w; ctx.height = h;
+    camera.aspect = w / h;
+    camera.updateProjectionMatrix();
+    applyRtSize();
+    return true;
+  };
+
+  // ---- visibility + prominence (drives scheduler priority + hard freeze) ----
   let visible = true;
   let ratio = 1; // intersectionRatio in [0..1]
   let wasOnScreen = false;
@@ -579,28 +811,40 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     ([e]) => {
       visible = e.isIntersecting;
       ratio = e.intersectionRatio;
-      // Going off-screen arms the clean-resume re-sync for the next time the
-      // scene scrolls back into view (see step()).
       if (!visible) wasOnScreen = false;
     },
-    // Multiple thresholds so prominence is continuous, not just on/off.
     { threshold: [0, 0.1, 0.25, 0.5, 0.75, 1] },
   );
   vis.observe(host);
 
-  const render = (t = 0) => {
-    if (finishPass && premiumOn) finishPass.uniforms.uTime.value = t;
+  // ── BLIT this scene's RT into its screen rect on the shared canvas ───────
+  // Reads the host's LIVE rect each frame (tracks scroll). Skips when the rect
+  // is fully outside the viewport. Y is flipped (GL origin = bottom-left).
+  const blitToScreen = () => {
+    const r = host.getBoundingClientRect();
+    const cw = sh.cssW, ch = sh.cssH;
+    // Off-screen / zero-size guard (clip to viewport bounds).
+    if (r.width <= 0 || r.height <= 0) return;
+    if (r.bottom <= 0 || r.top >= ch || r.right <= 0 || r.left >= cw) return;
+    // setViewport/setScissor take CSS pixels (three multiplies by pixelRatio).
+    const left = r.left;
+    const width = r.width;
+    const height = r.height;
+    const bottomUp = ch - r.bottom; // flip top-left DOM → bottom-left GL
+    renderer.setRenderTarget(null);
+    renderer.setViewport(left, bottomUp, width, height);
+    renderer.setScissor(left, bottomUp, width, height);
+    renderer.setScissorTest(true);
+    sh.blitUniforms.tDiffuse.value = (composer as EffectComposer).readBuffer.texture;
+    // Opaque scenes paint solidly (over); transparent/glowing scenes ADD their
+    // light over the background (see the blit-material comments in ensureShared).
+    (isOpaque ? sh.blitQuad : sh.blitAddQuad).render(renderer);
     sceneRenderCount++;
-    return composer ? composer.render() : renderer.render(scene, camera);
   };
 
   // ── React to governor quality changes ──────────────────────────────────
   const onGlobalQuality = (q: number) => {
     ctxState.quality = q;
-    // Drop the premium finish+SMAA full-screen passes when GPU-bound. Feature
-    // scenes shed them first (q<0.75); the hero is full-viewport and the single
-    // costliest scene, so it sheds them under deeper load (q<0.5) — SMAA + the
-    // filmic pass are two extra full-screen draws we can't afford on a weak iGPU.
     const wantPremium = tier === 'hero' ? q >= 0.5 : tier === 'feature' ? q >= 0.75 : false;
     if (wantPremium !== premiumOn && tier !== 'tile') {
       premiumOn = wantPremium;
@@ -612,46 +856,50 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   qSubs.add(onGlobalQuality);
 
   // ── Scheduler task ─────────────────────────────────────────────────────
-  // Cache a rough normalized area weight (updated on resize via ctx.width/height).
   const areaWeight = () => {
-    const a = (ctx.width * ctx.height) / (1280 * 720); // relative to a ~720p tile
+    const a = (ctx.width * ctx.height) / (1280 * 720);
     return Math.min(1, a);
   };
   const task: SchedTask = {
     _stride: 1,
     _phase: 0,
+    layer,
     active: () => visible && !document.hidden,
-    // HARD-FREEZE gate: only on-screen scenes tick. `active()` already excludes
-    // document.hidden; this adds the off-screen (non-intersecting) cutoff so a
-    // scrolled-away scene goes fully idle.
     onScreen: () => visible,
-    // Prominence: how centered/large on screen. Area gives big hero canvases a
-    // boost; ratio fades scenes near the viewport edges.
     priority: () => ratio * (0.4 + 0.6 * areaWeight()) + (tier === 'hero' ? 1 : 0),
-    // Each scene keeps its OWN clock time (seconds since it started) so per-scene
-    // animation phase/intro logic is byte-identical to the old per-scene rAF; the
-    // shared scheduler only supplies the frame delta and the render gate.
     step: (_t, dt, doRender) => {
-      // CLEAN RESUME after a freeze: while off-screen the scene was skipped, so
-      // ctx.clock kept advancing in wall-time but was never READ. Absorb that gap
-      // into a discarded delta (resets the clock's internal oldTime to now) so the
-      // very next getElapsedTime() advances by ~one frame, not by the whole span
-      // the scene spent off-screen — the animation resumes where it left off.
       if (!wasOnScreen) {
         wasOnScreen = true;
         ctx.clock.getDelta(); // discard the off-screen wall-time gap (capped resume)
       }
+      // Track the host's live rect (scene may have scrolled / page reflowed).
+      syncRect();
       const st = ctx.clock.getElapsedTime();
       ctxState.ticks++;
       ctx.pointer.lerp(targetPointer, 0.06);
+      // Scene advances its sim + may run GPGPU compute here (compute saves/
+      // restores its own render target). We composite AFTER, never interleaving
+      // compute inside the scissored screen sequence.
       for (const cb of frameCbs) cb(st, dt);
-      if (doRender) render(st);
+      if (doRender) renderScene(st);
     },
   };
 
-  // DEV-only per-scene tick probe (tree-shaken from production): lets Playwright
-  // read a single scene's live tick count + on-screen state by host id and PROVE
-  // that an off-screen scene's counter is frozen while a visible one climbs.
+  // Render the scene's composer into its RT, then blit to screen.
+  const renderScene = (t: number) => {
+    if (!composer) return;
+    if (finishPass && premiumOn) finishPass.uniforms.uTime.value = t;
+    // composer.render() drives its own render targets; it restores the render
+    // target it found on entry (null) at the end. Scissor is irrelevant here
+    // (each pass sets its RT, which carries full/disabled scissor).
+    renderer.setScissorTest(false);
+    renderer.setRenderTarget(target);
+    renderer.setViewport(0, 0, target.width, target.height);
+    composer.render();
+    blitToScreen();
+  };
+
+  // DEV-only per-scene tick probe.
   if (import.meta.env.DEV && typeof window !== 'undefined') {
     const w = window as unknown as { __sceneTicks?: Record<string, () => unknown> };
     if (!w.__sceneTicks) w.__sceneTicks = {};
@@ -661,19 +909,30 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
 
   // First frame always renders (so reduced-motion / first paint shows the world).
   const start = () => {
+    syncRect();
     if (reduced && opts.staticFallback !== false) {
-      // run one synchronous frame, then stop — no scheduler registration.
       requestAnimationFrame(() => {
+        syncRect();
+        // ensure the canvas is clear under this scene's rect, then draw once.
         for (const cb of frameCbs) cb(0, 0);
-        render();
+        renderScene(0);
+      });
+      // Even a static scene must register so the shared loop re-blits it after
+      // the per-frame full-canvas clear (otherwise it would vanish next frame).
+      // But it must NOT advance simulation. We register a no-sim task.
+      addTask({
+        ...task,
+        step: (_t, _dt, _r) => {
+          syncRect();
+          renderScene(0); // re-composite the static frame every loop (cheap; offscreen-skipped)
+        },
       });
       return;
     }
-    // Render one immediate frame so the canvas isn't blank before its first
-    // scheduled (possibly throttled) turn, then join the shared loop.
     requestAnimationFrame(() => {
+      syncRect();
       for (const cb of frameCbs) cb(0, 0);
-      render(0);
+      renderScene(0);
       addTask(task);
     });
   };
@@ -684,8 +943,6 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     destroyed = true;
     removeTask(task);
     qSubs.delete(onGlobalQuality);
-    cancelAnimationFrame(resizeRAF);
-    ro.disconnect();
     vis.disconnect();
     window.removeEventListener('pointermove', onPointer);
     for (const cb of disposeCbs) { try { cb(); } catch { /* noop */ } }
@@ -697,8 +954,9 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
       else mat?.dispose?.();
     });
     composer?.dispose?.();
-    renderer.dispose();
-    renderer.domElement.remove();
+    target.dispose();
+    // NOTE: we do NOT dispose the shared renderer here — other scenes may use it.
+    // It is torn down by disposeShared() when the last scene leaves / on swap.
   };
 
   // defer start one tick so the host has laid out
@@ -707,10 +965,27 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   return { ctx, onFrame, onDispose, onQuality, destroy };
 }
 
-/**
- * Mounts a scene module against the first matching host, and wires teardown on
- * Astro page swaps / unload. Returns the handle (or null if host missing).
- */
+/* ────────────────────────────────────────────────────────────────────────────
+ *  mount — bind a scene module to a host + wire SPA teardown.
+ * ────────────────────────────────────────────────────────────────────────── */
+
+// Track how many scenes are mounted on the current page so we can tear the
+// shared renderer down (and recreate it next page) when the last one leaves.
+let mountedCount = 0;
+let swapWired = false;
+
+function wireSharedSwapTeardown() {
+  if (swapWired) return;
+  swapWired = true;
+  // On SPA navigation, destroy the shared renderer + canvas so the next page
+  // starts clean (no leaked context, no double canvas). Scenes re-register and
+  // ensureShared() recreates it on astro:page-load.
+  document.addEventListener('astro:before-swap', () => {
+    disposeShared();
+    mountedCount = 0;
+  });
+}
+
 export function mount(
   selector: string | HTMLElement,
   build: (handle: SceneHandle) => void,
@@ -723,10 +998,17 @@ export function mount(
   if (host.dataset.mounted === '1') return null;
   host.dataset.mounted = '1';
 
+  wireSharedSwapTeardown();
   const handle = createScene({ host, ...opts });
   build(handle);
+  mountedCount++;
 
-  const cleanup = () => handle.destroy();
+  const cleanup = () => {
+    handle.destroy();
+    host.dataset.mounted = '';
+    mountedCount = Math.max(0, mountedCount - 1);
+    if (mountedCount === 0) disposeShared();
+  };
   document.addEventListener('astro:before-swap', cleanup, { once: true });
   window.addEventListener('beforeunload', cleanup, { once: true });
   return handle;

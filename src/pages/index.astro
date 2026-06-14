@@ -180,7 +180,13 @@ try {
       // keep bloom gentle + threshold high to avoid blowing the molecule to white.
       bloom: { strength: 0.4, radius: 0.55, threshold: 0.5 },
       alpha: true,
+      tier: 'hero',
+      layer: 2, // hero centerpiece — above the morph/ambient background fields
       maxPixelRatio: 2,
+      // SHARED RENDERER: core renders the hero's RT at this fraction of its CSS
+      // rect (the soft additive cloud upscales nearly invisibly). Matches the
+      // HERO_SCALE the hero uses for gl_PointSize. Governor pulls it lower on load.
+      renderScale: 0.6,
     });
   document.addEventListener('astro:page-load', mountHero);
 </script>

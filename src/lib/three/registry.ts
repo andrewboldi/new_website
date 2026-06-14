@@ -93,7 +93,8 @@ export async function mountScene(
     }
     case 'molecule': {
       const { moleculeViewer } = await import('./MoleculeViewer');
-      return mount(host, (h) => moleculeViewer(h, { url: extra.pdb ?? '' }), { bloom, tier });
+      // SOLID: the ball-and-stick body occludes the background (over-composite).
+      return mount(host, (h) => moleculeViewer(h, { url: extra.pdb ?? '' }), { bloom, tier, solid: true });
     }
     case 'protein': {
       const { proteinRibbon } = await import('./ProteinRibbon');
@@ -125,7 +126,8 @@ export async function mountScene(
     }
     case 'rubiks': {
       const { rubiksCube } = await import('./RubiksCube');
-      return mount(host, (h) => rubiksCube(h), { bloom, tier });
+      // SOLID: a plastic cube occludes the background rather than glowing over it.
+      return mount(host, (h) => rubiksCube(h), { bloom, tier, solid: true });
     }
     case 'routegraph': {
       const { routeGraph } = await import('./RouteGraph');
@@ -149,7 +151,8 @@ export async function mountScene(
     }
     case 'piano': {
       const { piano } = await import('./Piano');
-      return mount(host, (h) => piano(h), { bloom, tier, alpha: false });
+      // SOLID + opaque (alpha:false already fills its RT) — the keyboard occludes.
+      return mount(host, (h) => piano(h), { bloom, tier, alpha: false, solid: true });
     }
     case 'orbital':
     case 'helix':

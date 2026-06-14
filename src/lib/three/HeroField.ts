@@ -271,8 +271,13 @@ export function heroField(handle: SceneHandle) {
   // governor → scale multiplier on top of HERO_SCALE (deeper load → fewer pixels):
   //   q=1 →0.6×, 0.75→0.5×, 0.5→0.42×, <0.5→0.4× (floored). All upscaled by CSS.
   const heroDprScale = (q: number) => HERO_SCALE * (q >= 1 ? 1 : q >= 0.75 ? 0.84 : q >= 0.5 ? 0.7 : 0.67);
+  // SHARED RENDERER: core sizes this scene's render target (rect × renderScale ×
+  // governor-load). We do NOT touch the renderer's size/pixel-ratio here — index.
+  // astro passes `renderScale: HERO_SCALE` so the RT is rendered at the matching
+  // fraction of CSS res. `dpr` is kept ONLY to scale gl_PointSize (uPixelRatio) so
+  // point coverage matches the RT's device-pixel resolution; it tracks the same
+  // value core derives. It is no longer applied to the renderer.
   let dpr = Math.max(HERO_MIN_DPR, Math.min(devicePixelRatio || 1, HERO_DPR_CAP) * HERO_SCALE);
-  renderer.setPixelRatio(dpr);
   // Molecule fit: a touch larger than R so the ball-and-stick fills the frame.
   const molScale = (R * 1.15) / CAFFEINE_RADIUS;
 
@@ -484,22 +489,17 @@ export function heroField(handle: SceneHandle) {
     return Math.max(0, form - disperse);
   };
 
-  // Canvas fade: the field is a fixed full-screen overlay, so once the hero has
-  // scrolled away we fade the whole canvas out (lower sections keep only the
-  // page-wide MorphBackground — no double compositing / clutter).
-  const canvas = renderer.domElement;
+  // Hero fade: the field fills a fixed full-screen rect, so once the hero has
+  // scrolled away we fade IT out (lower sections keep only the page-wide
+  // MorphBackground — no double compositing / clutter). SHARED RENDERER: we can't
+  // fade the canvas (it's shared by every scene), so we fade the hero's own
+  // material alpha toward 0 instead — only the hero disperses, others are intact.
   const heroOpacity = () => {
     const y = window.scrollY;
     return Math.min(1, Math.max(0, 1 - (y - vh * 1.25) / (vh * 0.5)));
   };
 
   let progress = reduced ? 1 : 0;
-  // Cache the last canvas opacity we wrote so the per-frame update can skip the
-  // DOM write (and the `.toFixed(3)` STRING allocation it required) whenever the
-  // value is unchanged — which is the common idle case, where opacity is pinned
-  // at 1 above the fold. `.toFixed` allocated a fresh string every single frame;
-  // gating it removes that from the home-path hot loop (zero per-frame alloc).
-  let lastCanvasOpacity = -1;
 
   /* --------------------- adaptive quality (governor) -------------------- */
   // The hero always renders at full rate, so it carries a steady GPU cost. When
@@ -533,19 +533,16 @@ export function heroField(handle: SceneHandle) {
     targetFrac = Q_FRAC[q] ?? 1;
     computeStride = Q_STRIDE[q] ?? 1;
     if (reduced || !usedGPGPU) targetFrac = 1; // keep full look on the static/CPU paths
-    // FILL: pull the hero's render resolution down under load (CSS upscales). The
-    // full-viewport additive cloud is fill-bound, so fewer pixels is the biggest
-    // per-frame win on a weak iGPU. heroDprScale already folds in HERO_SCALE (the
-    // default 0.6× fraction); floor at HERO_MIN_DPR so it never gets mushy.
+    // FILL: core pulls the hero RT's resolution down under load (CSS upscales) via
+    // the scene's renderScale × governor load-scale. We only mirror that factor into
+    // uPixelRatio so gl_PointSize tracks the RT's device-pixel resolution (points
+    // stay correctly sized after the blit upscales). We do NOT resize the renderer.
     const wantDpr = Math.max(
       HERO_MIN_DPR,
       Math.min(devicePixelRatio || 1, HERO_DPR_CAP) * heroDprScale(q),
     );
     if (Math.abs(wantDpr - dpr) > 0.01) {
       dpr = wantDpr;
-      renderer.setPixelRatio(dpr);
-      renderer.setSize(ctx.width, ctx.height);
-      ctx.composer?.setSize(ctx.width, ctx.height);
       renderMat.uniforms.uPixelRatio.value = dpr;
     }
   };
@@ -594,7 +591,8 @@ export function heroField(handle: SceneHandle) {
     const breathe = progress < 0.02 ? (Math.sin(t * 0.5) * 0.5 + 0.5) * 0.06 : 0;
     const formProgress = Math.min(1, progress + breathe);
 
-    // canvas fade (also gates the compute-pause: an invisible hero need not sim)
+    // hero fade as it scrolls away (also gates the compute-pause: a fully-faded
+    // hero need not sim). SHARED RENDERER: folded into the material alpha below.
     const canvasOpacity = heroOpacity();
 
     if (usedGPGPU && gpu) {
@@ -608,7 +606,8 @@ export function heroField(handle: SceneHandle) {
       // so the cloud doesn't visibly thin. 1/sqrt(frac) keeps screen coverage ~flat.
       const comp = 1 / Math.sqrt(Math.max(0.2, activeFrac));
       renderMat.uniforms.uSize.value = pointSize * Math.min(comp, 1.7);
-      renderMat.uniforms.uAlpha.value = alphaScale * Math.min(comp, 1.5);
+      // fold the scroll-away fade into the additive alpha so only the hero fades.
+      renderMat.uniforms.uAlpha.value = alphaScale * Math.min(comp, 1.5) * canvasOpacity;
 
       // throttle the GPGPU sim: skip compute on off-frames but accumulate their
       // delta so the swirl speed is unchanged when it DOES step (no slow-motion).
@@ -648,21 +647,13 @@ export function heroField(handle: SceneHandle) {
       renderMat.uniforms.uTime.value = t;
     } else {
       cpuTick(t, formProgress);
+      // CPU path: fold the scroll-away fade into the additive alpha too.
+      renderMat.uniforms.uAlpha.value = alphaScale * canvasOpacity;
     }
 
     // slow cinematic spin; molecule settles upright as it forms
     group.rotation.y += delta * 0.06;
     group.rotation.x = THREE.MathUtils.lerp(group.rotation.x, ctx.pointer.y * 0.12 - formProgress * 0.1, 0.04);
-
-    // fade the fixed canvas out as the hero leaves (avoids overlaying lower
-    // sections). Only touch the DOM + allocate the string when the value moved
-    // by a perceptible amount (quantized to 1e-3 — the old toFixed(3) precision),
-    // so the steady above-the-fold idle case writes nothing and allocates nothing.
-    const qOpacity = Math.round(canvasOpacity * 1000) / 1000;
-    if (qOpacity !== lastCanvasOpacity) {
-      lastCanvasOpacity = qOpacity;
-      canvas.style.opacity = String(qOpacity);
-    }
   });
 
   onDispose(() => {

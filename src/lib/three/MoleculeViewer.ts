@@ -113,7 +113,10 @@ export function moleculeViewer(handle: SceneHandle, opts: Opts) {
   back.position.set(-4, 2, -11);
   scene.add(back);
 
-  const controls = new OrbitControls(camera, renderer.domElement);
+  // The shared GL canvas is fixed + pointer-events:none, so OrbitControls binds
+  // to the scene's HOST element (which overlays this scene's rect and receives
+  // events). The molecule auto-rotates; drag-to-spin works via the host.
+  const controls = new OrbitControls(camera, ctx.host);
   controls.enableZoom = false;
   controls.enablePan = false;
   controls.enableDamping = true;
