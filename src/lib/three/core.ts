@@ -419,8 +419,22 @@ function disposeShared() {
  * ────────────────────────────────────────────────────────────────────────── */
 
 interface SchedTask {
-  /** advance simulation + (maybe) render. Returns nothing; renders via compositor. */
+  /**
+   * Advance simulation and, when `render` is true, re-render this scene's
+   * composer into its OWN render target. Does NOT touch the shared canvas — the
+   * scheduler composites separately (see `composite`). This is the EXPENSIVE
+   * work the stride/governor throttles.
+   */
   step: (t: number, dt: number, render: boolean) => void;
+  /**
+   * BLIT this scene's render target (its last-rendered frame, persistent) into
+   * its host rect on the shared canvas. CHEAP (one textured quad), so the
+   * scheduler calls it for EVERY on-screen scene EVERY frame — that's what keeps
+   * the composited image complete (no blank regions) even for throttled scenes
+   * that didn't re-render this frame. Returns true if it actually blitted (i.e.
+   * the RT was initialized and the rect was on-screen).
+   */
+  composite: () => boolean;
   /** prominence in [0..1]: intersectionRatio × normalized canvas area. */
   priority: () => number;
   /** true while on-screen and not reduced-motion-frozen. */
@@ -442,17 +456,35 @@ interface SchedTask {
   /** stride bucket for throttled scenes (filled by the scheduler each frame). */
   _stride: number;
   _phase: number;
+  /**
+   * True once the scene has rendered its RT at least once. Until then its RT is
+   * uninitialized and MUST NOT be blitted (it would flash garbage/black). The
+   * scheduler uses this to render-on-first-appearance and to avoid counting an
+   * un-blitted just-appeared scene as a flicker shortfall.
+   */
+  _everRendered: boolean;
 }
 
 const tasks = new Set<SchedTask>();
 let schedRAF = 0;
 let frameIndex = 0;
 
-// Lightweight instrumentation: total number of ACTUAL scene composites performed.
+// Lightweight instrumentation, split so we can PROVE the fix:
+//  • sceneRenderCount  — EXPENSIVE composer renders (throttled by stride/governor).
+//  • sceneCompositeCount — CHEAP blits onto the shared canvas (every on-screen
+//    scene, EVERY frame). A flicker would show up as composites < on-screen×frames.
 let sceneRenderCount = 0;
+let sceneCompositeCount = 0;
 let schedTicks = 0; // number of scheduler-loop iterations (detects rAF starvation)
+// Per-frame composite accounting: how many on-screen scenes blitted on the frame
+// that just completed, and how many were on-screen and SHOULD have. The verifier
+// asserts these are equal on every frame (no blank regions).
+let lastFrameOnScreen = 0;
+let lastFrameComposited = 0;
+let frameCompositeShortfalls = 0; // frames where composited < onScreen (a flicker)
 if (import.meta.env.DEV && typeof window !== 'undefined') {
   (window as unknown as { __sceneRenderCount: () => number }).__sceneRenderCount = () => sceneRenderCount;
+  (window as unknown as { __sceneCompositeCount: () => number }).__sceneCompositeCount = () => sceneCompositeCount;
   (window as unknown as { __sceneStats: () => unknown }).__sceneStats = () => {
     const strides: Record<number, number> = {};
     let active = 0;
@@ -464,6 +496,10 @@ if (import.meta.env.DEV && typeof window !== 'undefined') {
     }
     return {
       renders: sceneRenderCount,
+      composites: sceneCompositeCount,
+      lastFrameOnScreen,
+      lastFrameComposited,
+      frameCompositeShortfalls, // MUST stay 0 — any increment is a blank-region frame
       schedTicks,
       activeScenes: active,
       offscreenScenes: offscreen,
@@ -550,20 +586,14 @@ function schedulerLoop(now: number) {
   governorTick(frameMs);
   assignStrides();
 
-  const sh = shared;
-  // Clear the whole shared canvas ONCE per frame (scissor OFF so it clears the
-  // full framebuffer, not just the last scene's rect). autoClear is false.
-  if (sh) {
-    sh.renderer.setRenderTarget(null);
-    sh.renderer.setScissorTest(false);
-    sh.renderer.clear(true, true, true);
-  }
-
   const t = now / 1000;
   const dt = Math.min(frameMs / 1000, 0.05);
-  // Build the active list and render in ascending LAYER order so background
+
+  // Build the on-screen list ONCE and sort by ascending LAYER so background
   // fields composite UNDER content tiles on the single shared canvas (a
   // fullscreen background blitted after a tile would otherwise overpaint it).
+  // Stable-ish sort by layer only (preserves Set order within a layer, which is
+  // mount order — fine for same-layer siblings that don't overlap).
   const order = renderScratch;
   let m = 0;
   for (const tk of tasks) {
@@ -571,13 +601,51 @@ function schedulerLoop(now: number) {
     order[m++] = tk;
   }
   order.length = m;
-  // Stable-ish sort by layer only (preserves Set order within a layer, which is
-  // mount order — fine for same-layer siblings that don't overlap).
   order.sort(byLayerAsc);
+
+  // ── PASS 1: SIMULATE + (throttled) RE-RENDER ────────────────────────────
+  // Each scene advances its sim every frame; only the stride/governor-selected
+  // subset re-renders its composer into its OWN render target (the expensive
+  // work). Throttled scenes keep their last RT untouched — it's reused as-is by
+  // the composite pass below. This pass does NOT touch the shared canvas.
   for (let i = 0; i < m; i++) {
     const tk = order[i];
     const render = (frameIndex % tk._stride) === tk._phase % tk._stride;
     tk.step(t, dt, render);
+  }
+
+  // ── PASS 2: COMPOSITE (clear once, then blit EVERY on-screen scene) ──────
+  // The render targets above are stable, so we can clear the canvas and blit
+  // every on-screen scene's RT — including throttled ones that didn't re-render
+  // this frame — producing a COMPLETE image with no blank regions. The blit is
+  // cheap (a scissored textured quad), so doing it for all visible scenes every
+  // frame is fine and is what kills the throttle-induced flicker.
+  //
+  // Ordering matters: we MUST clear *after* PASS 1, because a scene's
+  // composer.render() leaves the renderer bound to null with a full viewport,
+  // and clearing here guarantees a clean framebuffer right before compositing
+  // (no double-clear: this is the ONLY clear per frame).
+  const sh = shared;
+  if (sh) {
+    sh.renderer.setRenderTarget(null);
+    sh.renderer.setScissorTest(false);
+    sh.renderer.clear(true, true, true);
+  }
+  let composited = 0;
+  for (let i = 0; i < m; i++) {
+    if (order[i].composite()) composited++;
+  }
+  // Per-frame flicker accounting: every on-screen scene that has rendered at
+  // least once must composite. A scene entering view that hasn't rendered yet
+  // legitimately can't blit (its RT is uninitialized) — that's not a flicker, so
+  // we only flag a shortfall once all on-screen scenes are initialized.
+  lastFrameOnScreen = m;
+  lastFrameComposited = composited;
+  if (composited < m) {
+    // Distinguish "uninitialized, will render next" from a true blank region.
+    let initialized = 0;
+    for (let i = 0; i < m; i++) if (order[i]._everRendered) initialized++;
+    if (composited < initialized) frameCompositeShortfalls++;
   }
 
   // Leave the renderer in a clean state for the next frame / any external GL use.
@@ -807,6 +875,9 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   let visible = true;
   let ratio = 1; // intersectionRatio in [0..1]
   let wasOnScreen = false;
+  // True once this scene's RT holds a rendered frame. Guards the blit so we never
+  // composite an uninitialized RT (would flash garbage). Set on first renderScene.
+  let everRendered = false;
   const vis = new IntersectionObserver(
     ([e]) => {
       visible = e.isIntersecting;
@@ -817,15 +888,20 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   );
   vis.observe(host);
 
-  // ── BLIT this scene's RT into its screen rect on the shared canvas ───────
+  // ── BLIT (COMPOSITE) this scene's RT into its screen rect on the shared canvas.
   // Reads the host's LIVE rect each frame (tracks scroll). Skips when the rect
-  // is fully outside the viewport. Y is flipped (GL origin = bottom-left).
-  const blitToScreen = () => {
+  // is fully outside the viewport. Y is flipped (GL origin = bottom-left). This
+  // is the CHEAP per-frame work: it ALWAYS uses the RT's CURRENT contents (the
+  // last frame the composer rendered), so a throttled scene that didn't re-render
+  // this frame still paints its full region — no blank flicker. Returns true if
+  // it actually drew (RT initialized + rect on-screen).
+  const blitToScreen = (): boolean => {
+    if (!everRendered) return false; // RT not yet initialized — nothing to blit
     const r = host.getBoundingClientRect();
     const cw = sh.cssW, ch = sh.cssH;
     // Off-screen / zero-size guard (clip to viewport bounds).
-    if (r.width <= 0 || r.height <= 0) return;
-    if (r.bottom <= 0 || r.top >= ch || r.right <= 0 || r.left >= cw) return;
+    if (r.width <= 0 || r.height <= 0) return false;
+    if (r.bottom <= 0 || r.top >= ch || r.right <= 0 || r.left >= cw) return false;
     // setViewport/setScissor take CSS pixels (three multiplies by pixelRatio).
     const left = r.left;
     const width = r.width;
@@ -839,7 +915,8 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     // Opaque scenes paint solidly (over); transparent/glowing scenes ADD their
     // light over the background (see the blit-material comments in ensureShared).
     (isOpaque ? sh.blitQuad : sh.blitAddQuad).render(renderer);
-    sceneRenderCount++;
+    sceneCompositeCount++;
+    return true;
   };
 
   // ── React to governor quality changes ──────────────────────────────────
@@ -863,12 +940,14 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   const task: SchedTask = {
     _stride: 1,
     _phase: 0,
+    _everRendered: false,
     layer,
     active: () => visible && !document.hidden,
     onScreen: () => visible,
     priority: () => ratio * (0.4 + 0.6 * areaWeight()) + (tier === 'hero' ? 1 : 0),
     step: (_t, dt, doRender) => {
-      if (!wasOnScreen) {
+      const firstAppearance = !wasOnScreen;
+      if (firstAppearance) {
         wasOnScreen = true;
         ctx.clock.getDelta(); // discard the off-screen wall-time gap (capped resume)
       }
@@ -878,14 +957,28 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
       ctxState.ticks++;
       ctx.pointer.lerp(targetPointer, 0.06);
       // Scene advances its sim + may run GPGPU compute here (compute saves/
-      // restores its own render target). We composite AFTER, never interleaving
-      // compute inside the scissored screen sequence.
+      // restores its own render target). The shared canvas is composited by the
+      // scheduler AFTER this pass — we never interleave compute inside a blit.
       for (const cb of frameCbs) cb(st, dt);
-      if (doRender) renderScene(st);
+      // RENDER-ON-FIRST-APPEARANCE: a scene just entering view (or that has never
+      // rendered) MUST render once this frame so its RT is initialized before the
+      // composite pass tries to blit it — otherwise its region would be blank for
+      // a frame (a flash). After that, the stride/governor decides.
+      if (doRender || !everRendered) renderScene(st);
     },
+    // CHEAP per-frame composite: blit the (possibly throttled, last-rendered) RT.
+    composite: () => blitToScreen(),
   };
 
-  // Render the scene's composer into its RT, then blit to screen.
+  // The task object actually registered with the scheduler. For animated scenes
+  // it's `task`; for reduced-motion it's a no-sim variant (see start()). Kept so
+  // renderScene + destroy reference the live registered object, not a stale copy.
+  let registeredTask: SchedTask = task;
+
+  // Render the scene's composer into its OWN render target. Does NOT blit to the
+  // shared canvas — the scheduler's composite pass blits every on-screen scene
+  // (this one included) separately, so throttled scenes that skip this still get
+  // composited from their last RT. This is the EXPENSIVE, throttled half.
   const renderScene = (t: number) => {
     if (!composer) return;
     if (finishPass && premiumOn) finishPass.uniforms.uTime.value = t;
@@ -896,7 +989,11 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     renderer.setRenderTarget(target);
     renderer.setViewport(0, 0, target.width, target.height);
     composer.render();
-    blitToScreen();
+    everRendered = true;
+    // Flag the ACTUAL registered task (the live or static variant) so the
+    // scheduler's flicker accounting sees this scene as initialized.
+    registeredTask._everRendered = true;
+    sceneRenderCount++;
   };
 
   // DEV-only per-scene tick probe.
@@ -911,28 +1008,32 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   const start = () => {
     syncRect();
     if (reduced && opts.staticFallback !== false) {
-      requestAnimationFrame(() => {
-        syncRect();
-        // ensure the canvas is clear under this scene's rect, then draw once.
-        for (const cb of frameCbs) cb(0, 0);
-        renderScene(0);
-      });
-      // Even a static scene must register so the shared loop re-blits it after
-      // the per-frame full-canvas clear (otherwise it would vanish next frame).
-      // But it must NOT advance simulation. We register a no-sim task.
-      addTask({
+      // REDUCED MOTION: render the static frame ONCE into the RT, then register a
+      // no-sim, no-rerender task. The scheduler's composite pass re-blits that
+      // single RT every frame (cheap), so the static image stays on the shared
+      // canvas after each full-canvas clear without ever re-rendering the composer.
+      registeredTask = {
         ...task,
         step: (_t, _dt, _r) => {
+          // Only keep the rect in sync (it may scroll); never re-render the sim.
+          // If the RT somehow isn't initialized yet, render once to seed it.
           syncRect();
-          renderScene(0); // re-composite the static frame every loop (cheap; offscreen-skipped)
+          if (!everRendered) renderScene(0);
         },
+        // composite is inherited from `task` (blitToScreen) — blits the static RT.
+      };
+      addTask(registeredTask);
+      requestAnimationFrame(() => {
+        syncRect();
+        for (const cb of frameCbs) cb(0, 0);
+        renderScene(0); // seed the RT so the composite pass has something to blit
       });
       return;
     }
     requestAnimationFrame(() => {
       syncRect();
       for (const cb of frameCbs) cb(0, 0);
-      renderScene(0);
+      renderScene(0); // initialize the RT before the first composite pass blits it
       addTask(task);
     });
   };
@@ -941,7 +1042,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   const destroy = () => {
     if (destroyed) return;
     destroyed = true;
-    removeTask(task);
+    removeTask(registeredTask); // the actual registered task (live or static variant)
     qSubs.delete(onGlobalQuality);
     vis.disconnect();
     window.removeEventListener('pointermove', onPointer);
