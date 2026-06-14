@@ -262,8 +262,8 @@ let fastAccum = 0; // ms spent "fast" (debounce stepping up)
 // sustained avg < 15ms (~66fps). Hysteresis via the accum debounce windows.
 const SLOW_MS = 22;
 const FAST_MS = 15;
-const STEP_DEBOUNCE = 900; // ms a condition must persist before we change qLevel
-const Q_STEPS = [1, 0.75, 0.5]; // quality ladder
+const STEP_DEBOUNCE = 600; // ms a condition must persist before we change qLevel
+const Q_STEPS = [1, 0.75, 0.5, 0.35]; // quality ladder (0.35 = deepest cut for weak iGPUs)
 
 function setQuality(next: number) {
   if (next === qLevel) return;
@@ -305,7 +305,7 @@ function assignStrides() {
   const live: SchedTask[] = [];
   for (const tk of tasks) if (tk.active() && tk.onScreen()) live.push(tk);
   live.sort((a, b) => b.priority() - a.priority());
-  const farStride = qLevel < 1 ? 4 : 3;
+  const farStride = qLevel <= 0.5 ? 5 : qLevel < 1 ? 4 : 3;
   for (let i = 0; i < live.length; i++) {
     const tk = live[i];
     if (i < FULL_RATE_BUDGET) tk._stride = 1;
@@ -412,8 +412,17 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     composer.addPass(renderPass);
     // Bloom (linear). Default threshold 0.5 so only genuinely bright/emissive
     // accents glow instead of washing the whole frame to mush.
+    // FILL: UnrealBloom is a multi-pass full-screen blur — the single biggest
+    // post cost on a weak iGPU. Its internal mip pyramid is sized HALF-res here
+    // (the bloom is a soft wide glow, so half-res is visually indistinguishable
+    // but quarters the bloom blur fill). The resolution vec only sets the mip
+    // chain size; the composer still composites it back at full res.
+    const bloomRes = new THREE.Vector2(
+      Math.max(1, Math.round(width * 0.5)),
+      Math.max(1, Math.round(height * 0.5)),
+    );
     bloomPass = new UnrealBloomPass(
-      new THREE.Vector2(width, height),
+      bloomRes,
       opts.bloom.strength ?? 0.8,
       opts.bloom.radius ?? 0.5,
       opts.bloom.threshold ?? 0.5,
@@ -486,16 +495,21 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   // ---- resize ----
   let resizeRAF = 0;
   const applyPixelRatio = () => {
-    // Under load the governor pulls hero/feature pixel ratio toward 1; tiles are
-    // already capped at 1 so this is a no-op there.
-    const loadScale = qLevel >= 1 ? 1 : qLevel >= 0.75 ? 0.85 : 0.7;
-    const want = Math.min(devicePixelRatio, baseCap) * (tier === 'tile' ? 1 : loadScale);
-    const clamped = Math.max(1, want);
+    // Under load the governor pulls pixel ratio DOWN aggressively — resolution
+    // is the #1 fill lever on a weak iGPU. Tiles too (their full-screen siblings
+    // dominate fill; a tile at 0.8 DPR is still crisp at its small size).
+    const loadScale = qLevel >= 1 ? 1 : qLevel >= 0.75 ? 0.8 : qLevel >= 0.5 ? 0.65 : 0.5;
+    const want = Math.min(devicePixelRatio, baseCap) * loadScale;
+    // Allow sub-1.0 effective pixel ratio under load (CSS upscales) — this is
+    // where the big fill wins come from. Floor at 0.5 so it never gets mushy.
+    const clamped = Math.max(0.5, want);
     if (Math.abs(clamped - curPixelRatio) > 0.01) {
       curPixelRatio = clamped;
       renderer.setPixelRatio(clamped);
       renderer.setSize(ctx.width, ctx.height);
       composer?.setSize(ctx.width, ctx.height);
+      // composer.setSize resized bloom to full res — pull it back to half-res.
+      bloomPass?.setSize(Math.max(1, Math.round(ctx.width * 0.5)), Math.max(1, Math.round(ctx.height * 0.5)));
       finishPass?.uniforms.uResolution.value.set(ctx.width, ctx.height);
     }
   };
@@ -509,6 +523,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
       camera.updateProjectionMatrix();
       renderer.setSize(w, h);
       composer?.setSize(w, h);
+      bloomPass?.setSize(Math.max(1, Math.round(w * 0.5)), Math.max(1, Math.round(h * 0.5)));
       finishPass?.uniforms.uResolution.value.set(w, h);
     });
   });
@@ -546,8 +561,11 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   // ── React to governor quality changes ──────────────────────────────────
   const onGlobalQuality = (q: number) => {
     ctxState.quality = q;
-    // Feature scenes drop the premium finish+SMAA passes first when GPU-bound.
-    const wantPremium = tier === 'hero' ? true : tier === 'feature' ? q >= 0.75 : false;
+    // Drop the premium finish+SMAA full-screen passes when GPU-bound. Feature
+    // scenes shed them first (q<0.75); the hero is full-viewport and the single
+    // costliest scene, so it sheds them under deeper load (q<0.5) — SMAA + the
+    // filmic pass are two extra full-screen draws we can't afford on a weak iGPU.
+    const wantPremium = tier === 'hero' ? q >= 0.5 : tier === 'feature' ? q >= 0.75 : false;
     if (wantPremium !== premiumOn && tier !== 'tile') {
       premiumOn = wantPremium;
       rebuildPasses();

@@ -56,12 +56,16 @@ const FS = /* glsl */ `
     float d = hash(i + vec2(1.0, 1.0));
     return mix(mix(a, b, f.x), mix(c, d, f.x), f.y);
   }
-  // 3-octave fBm (octaves capped at 3 per the perf budget)
+  // 2-octave fBm. FILL: this fullscreen fBm is sampled 3× per pixel (two warp
+  // sources + final), so octaves dominate its per-pixel ALU. The field is blurred
+  // + low-opacity behind everything, so the 3rd octave's fine detail is erased by
+  // the blur — dropping to 2 octaves cuts ~⅓ of the noise taps for no visible
+  // change. (Was 3.)
   float fbm(vec2 p) {
     float v = 0.0;
-    float amp = 0.55;
+    float amp = 0.6;
     mat2 rot = mat2(0.80, 0.60, -0.60, 0.80);  // decorrelate octaves
-    for (int i = 0; i < 3; i++) {
+    for (int i = 0; i < 2; i++) {
       v += amp * vnoise(p);
       p = rot * p * 2.0;
       amp *= 0.5;

@@ -235,23 +235,29 @@ export function heroField(handle: SceneHandle) {
   // CPU fallback path so we can verify it renders without real float targets.
   const forceCPU = typeof window !== 'undefined' && (window as any).__HERO_FORCE_CPU__ === true;
 
-  // Texture size: 256² (~65k) desktop, 160² (~25k) weaker GPUs / mobile.
-  // (Was 512²≈262k — far more than the denoise-into-caffeine needs to read; the
-  // ball-and-stick is fully legible at 65k and per-frame fill/vertex cost drops
-  // ~4×, which is the main scroll-smoothness win. Perf budget: POLA-fast.)
+  // Texture size: 200² (~40k) desktop, 144² (~20k) weaker GPUs / mobile.
+  // (Was 256²≈65k, originally 512²≈262k.) The denoise-into-caffeine reads fully
+  // legible at 40k, and on a weak iGPU the additive-point FILL (count × sprite
+  // area, overdrawn) is the dominant homepage cost — fewer/smaller points is the
+  // single biggest hero fill win. Perf budget: POLA-fast on the worst iGPU.
   const mobile = ctx.width < 760 ||
     (typeof navigator !== 'undefined' && /Mobi|Android/i.test(navigator.userAgent));
-  const WIDTH = mobile ? 160 : 256;
+  const WIDTH = mobile ? 144 : 200;
   const COUNT = WIDTH * WIDTH;
 
   const cloudColor = new THREE.Color(PALETTE.cyan).lerp(new THREE.Color(PALETTE.blue), 0.35);
-  // Cap the hero's pixel ratio LOW (≤1.25). index.astro mounts the hero at
-  // maxPixelRatio:2 on the 'feature' tier (bloom+finish+SMAA), so at DPR 2 the
-  // fullscreen additive fill + 4 post passes quadruple in cost for no visible
-  // gain on a soft glowing cloud. Set the renderer ratio directly here (it owns
-  // its canvas) and feed the same value to the point-size uniform.
-  const HERO_DPR_CAP = 1.25;
-  const dpr = Math.min(renderer.getPixelRatio(), HERO_DPR_CAP);
+  // Cap the hero's pixel ratio LOW (≤1.0). index.astro mounts the hero at
+  // maxPixelRatio:2 on the 'feature' tier (bloom+finish+SMAA), so at high DPR the
+  // fullscreen additive fill + post passes multiply in cost for no visible gain on
+  // a soft glowing cloud. The hero is a full-viewport additive cloud — the #1 fill
+  // sink — so we render it at ≤1.0 effective px (CSS upscales) and let the governor
+  // pull it lower still under load. We OWN the renderer here, so we drive its pixel
+  // ratio directly each frame from the governor quality (the core governor's
+  // applyPixelRatio targets `baseCap` which we override, so we manage DPR ourselves).
+  const HERO_DPR_CAP = 1.0;
+  // governor → effective DPR multiplier (sub-1.0 = render fewer pixels, upscale).
+  const heroDprScale = (q: number) => (q >= 1 ? 1 : q >= 0.75 ? 0.85 : q >= 0.5 ? 0.7 : 0.6);
+  let dpr = Math.min(devicePixelRatio || 1, HERO_DPR_CAP);
   renderer.setPixelRatio(dpr);
   // Molecule fit: a touch larger than R so the ball-and-stick fills the frame.
   const molScale = (R * 1.15) / CAFFEINE_RADIUS;
@@ -350,13 +356,15 @@ export function heroField(handle: SceneHandle) {
   let targetTex: THREE.DataTexture | null = null;
   let targetColTex: THREE.DataTexture | null = null;
 
-  // point size: bigger for the sparser 65k/25k clouds so coverage/luminance hold
-  // after the count cut (256²≈65k desktop, 160²≈25k mobile), larger still for CPU.
-  const pointSize = usedGPGPU ? (WIDTH >= 256 ? 2.2 : 2.8) : 2.8;
+  // point size: FILL is count × sprite-area, so keep sprites SMALL on the weak
+  // iGPU. 40k desktop (200²) at ~1.9px, 20k mobile (144²) a touch larger for
+  // coverage; CPU path (tiny count) larger still. Smaller than before — the soft
+  // additive haze still reads, and overdraw drops sharply.
+  const pointSize = usedGPGPU ? (WIDTH >= 200 ? 1.9 : 2.4) : 2.8;
   // global alpha: lower per-point alpha so additive overlap doesn't saturate to
-  // white (esp. once formed onto the thin molecule). Nudged up vs the old 512²
-  // value to compensate for the lower density at 256²/160².
-  const alphaScale = usedGPGPU ? (WIDTH >= 256 ? 0.14 : 0.22) : 0.5;
+  // white (esp. once formed onto the thin molecule) and so each fragment costs
+  // less to blend. Nudged for the 40k/20k densities.
+  const alphaScale = usedGPGPU ? (WIDTH >= 200 ? 0.17 : 0.24) : 0.5;
 
   let renderMat: THREE.ShaderMaterial;
   if (usedGPGPU && gpu) {
@@ -520,6 +528,17 @@ export function heroField(handle: SceneHandle) {
     targetFrac = Q_FRAC[q] ?? 1;
     computeStride = Q_STRIDE[q] ?? 1;
     if (reduced || !usedGPGPU) targetFrac = 1; // keep full look on the static/CPU paths
+    // FILL: pull the hero's render resolution down under load (CSS upscales). The
+    // full-viewport additive cloud is fill-bound, so fewer pixels is the biggest
+    // per-frame win on a weak iGPU. Re-apply renderer size at the new ratio.
+    const wantDpr = Math.min(devicePixelRatio || 1, HERO_DPR_CAP) * heroDprScale(q);
+    if (Math.abs(wantDpr - dpr) > 0.01) {
+      dpr = wantDpr;
+      renderer.setPixelRatio(dpr);
+      renderer.setSize(ctx.width, ctx.height);
+      ctx.composer?.setSize(ctx.width, ctx.height);
+      renderMat.uniforms.uPixelRatio.value = dpr;
+    }
   };
   onQuality(applyQuality);
 
