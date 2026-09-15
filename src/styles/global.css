@@ -48,7 +48,10 @@
 /* ---------- reset ---------- */
 *, *::before, *::after { box-sizing: border-box; }
 * { margin: 0; }
-html { -webkit-text-size-adjust: 100%; scroll-behavior: smooth; }
+/* NO `scroll-behavior: smooth` — it fights the damped scroll layer
+   (src/scripts/smooth-scroll.ts), double-animating every programmatic scroll.
+   Smoothing is owned by that module, which bails out under reduced motion. */
+html { -webkit-text-size-adjust: 100%; }
 @media (prefers-reduced-motion: reduce) {
   html { scroll-behavior: auto; }
   *, *::before, *::after { animation-duration: 0.001ms !important; animation-iteration-count: 1 !important; transition-duration: 0.001ms !important; }

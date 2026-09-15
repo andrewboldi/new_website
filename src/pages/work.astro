@@ -171,6 +171,7 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
   <script>
     import { startCardFx, type CardFxController } from '@/lib/cardfx/engine';
     import { startWorkHScroll, type HScrollController } from '@/scripts/work-hscroll';
+    import { scrollToY } from '@/scripts/smooth-scroll';
 
     // ============================================================
     // Work page controllers are transition-aware (Astro ClientRouter).
@@ -239,7 +240,7 @@ const liveCount = PROJECTS.filter((p) => p.link || p.live).length;
         // also snap the page back to the gallery top so the user sees the new set
         if (hscroll && gallery) {
           const top = gallery.getBoundingClientRect().top + window.scrollY;
-          if (window.scrollY > top) window.scrollTo({ top, behavior: 'smooth' });
+          if (window.scrollY > top) scrollToY(top);
         }
       }
 

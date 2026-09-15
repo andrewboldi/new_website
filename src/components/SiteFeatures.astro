@@ -104,6 +104,7 @@ const cmds = [
 <script>
   import { SITE } from '@/lib/site';
   import { navigate } from 'astro:transitions/client';
+  import { scrollToY } from '@/scripts/smooth-scroll';
 
   // ============================================================
   // SiteFeatures is NOT persisted: Astro re-renders this overlay DOM on every
@@ -176,7 +177,7 @@ const cmds = [
     R.input = document.getElementById('cmdk-input') as HTMLInputElement | null;
     R.items = Array.from(document.querySelectorAll<HTMLElement>('.cmdk__item'));
 
-    R.totop?.addEventListener('click', () => scrollTo({ top: 0, behavior: 'smooth' }));
+    R.totop?.addEventListener('click', () => scrollToY(0));
     R.helpFab?.addEventListener('click', () => (R.help?.hidden ? openHelp() : closeHelp()));
     R.help?.querySelectorAll('[data-help-close]').forEach((b) => b.addEventListener('click', closeHelp));
     R.input?.addEventListener('input', () => R.input && filter(R.input.value));

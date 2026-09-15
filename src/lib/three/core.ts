@@ -211,6 +211,21 @@ export interface CreateSceneOpts {
    *              compensation lives in the scene/registry so tiles still glow.
    */
   tier?: SceneTier;
+  /**
+   * Added to this scene's scheduler priority, which decides which scenes get
+   * FULL frame rate (`_stride = 1`) and which are throttled to every 2nd/3rd
+   * frame. Base priority is `intersectionRatio × area` (+1 for tier 'hero'), so
+   * two fullscreen background fields both score ~1.0 and the tie breaks on MOUNT
+   * ORDER — which silently starved the scroll-linked morph field to 30fps behind
+   * the purely decorative fBm atmosphere.
+   *
+   * Pass a small boost (~0.5) on any scene whose motion is SCROLL-LINKED: those
+   * must sample scroll every frame or they visibly stair-step, while ambient,
+   * slow, or blurred scenes are indistinguishable at half rate. This re-ranks
+   * scenes rather than adding frame budget — the throttling still applies, it
+   * just falls on the scene that can afford it.
+   */
+  priorityBoost?: number;
   /** scene needs shadow maps (the bookshelf). Enables shadowMap on the shared renderer. */
   shadows?: boolean;
   /**
@@ -469,6 +484,29 @@ const tasks = new Set<SchedTask>();
 let schedRAF = 0;
 let frameIndex = 0;
 
+/**
+ * Optional hook run at the TOP of every scheduler frame, before any scene steps.
+ * Exists for the damped-scroll layer (src/scripts/smooth-scroll.ts): the scroll
+ * position must advance before scroll-linked scenes read `window.scrollY` in the
+ * same frame, or the background trails the page by one frame. Driving it from
+ * this rAF instead of a second one is what keeps them locked together.
+ */
+let preFrame: ((nowMs: number) => void) | null = null;
+
+/**
+ * Register (or clear, with null) the pre-frame hook. Keeps the scheduler rAF
+ * alive on its own, so a page with zero mounted scenes still ticks the hook —
+ * otherwise smooth scrolling would silently die wherever no scene is mounted.
+ */
+export function setPreFrame(cb: ((nowMs: number) => void) | null) {
+  preFrame = cb;
+  if (cb) ensureScheduler();
+  else if (tasks.size === 0 && schedRAF) {
+    cancelAnimationFrame(schedRAF);
+    schedRAF = 0;
+  }
+}
+
 // Lightweight instrumentation, split so we can PROVE the fix:
 //  • sceneRenderCount  — EXPENSIVE composer renders (throttled by stride/governor).
 //  • sceneCompositeCount — CHEAP blits onto the shared canvas (every on-screen
@@ -583,6 +621,10 @@ function schedulerLoop(now: number) {
   if (document.hidden) return;
   schedTicks++;
 
+  // Advance damped scroll FIRST — every scene below reads window.scrollY, and
+  // they must all see the position this frame actually renders at.
+  if (preFrame) preFrame(now);
+
   governorTick(frameMs);
   assignStrides();
 
@@ -668,7 +710,8 @@ function addTask(tk: SchedTask) {
 
 function removeTask(tk: SchedTask) {
   tasks.delete(tk);
-  if (tasks.size === 0 && schedRAF) {
+  // Keep the loop alive for the pre-frame hook (damped scroll) even with no scenes.
+  if (tasks.size === 0 && !preFrame && schedRAF) {
     cancelAnimationFrame(schedRAF);
     schedRAF = 0;
   }
@@ -682,6 +725,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   const { host } = opts;
   const reduced = prefersReducedMotion();
   const tier: SceneTier = opts.tier ?? 'feature';
+  const priorityBoost = opts.priorityBoost ?? 0;
 
   const sh = ensureShared();
   if (opts.shadows) {
@@ -878,6 +922,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
   // True once this scene's RT holds a rendered frame. Guards the blit so we never
   // composite an uninitialized RT (would flash garbage). Set on first renderScene.
   let everRendered = false;
+  let ownRenders = 0; // DEV: this scene's own composer renders (proves its real frame rate)
   const vis = new IntersectionObserver(
     ([e]) => {
       visible = e.isIntersecting;
@@ -944,7 +989,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     layer,
     active: () => visible && !document.hidden,
     onScreen: () => visible,
-    priority: () => ratio * (0.4 + 0.6 * areaWeight()) + (tier === 'hero' ? 1 : 0),
+    priority: () => ratio * (0.4 + 0.6 * areaWeight()) + (tier === 'hero' ? 1 : 0) + priorityBoost,
     step: (_t, dt, doRender) => {
       const firstAppearance = !wasOnScreen;
       if (firstAppearance) {
@@ -990,6 +1035,7 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     renderer.setViewport(0, 0, target.width, target.height);
     composer.render();
     everRendered = true;
+    ownRenders++;
     // Flag the ACTUAL registered task (the live or static variant) so the
     // scheduler's flicker accounting sees this scene as initialized.
     registeredTask._everRendered = true;
@@ -1001,7 +1047,18 @@ export function createScene(opts: CreateSceneOpts): SceneHandle {
     const w = window as unknown as { __sceneTicks?: Record<string, () => unknown> };
     if (!w.__sceneTicks) w.__sceneTicks = {};
     const key = host.id || host.dataset.scene || `scene-${tasks.size}-${Math.random().toString(36).slice(2, 6)}`;
-    w.__sceneTicks[key] = () => ({ ticks: ctxState.ticks, onScreen: visible, ratio });
+    // `stride` + `priority` are the observability that was MISSING when the
+    // scroll-linked morph field silently lost its full-rate slot to the ambient
+    // fBm on a mount-order tie-break and ran at 30fps. Nothing in the codebase
+    // could see which scenes won full rate, so the regression was invisible.
+    w.__sceneTicks[key] = () => ({
+      ticks: ctxState.ticks,
+      onScreen: visible,
+      ratio,
+      stride: registeredTask._stride,
+      priority: registeredTask.priority(),
+      renders: ownRenders,
+    });
   }
 
   // First frame always renders (so reduced-motion / first paint shows the world).

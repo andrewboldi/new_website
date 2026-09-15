@@ -1,21 +1,38 @@
 ---
 /**
- * Fixed, scroll-driven morphing particle field used as a living page background.
- * Drop it once near the top of a page, then wrap the page content in
- * `<div class="page-body">` so text reads over it. Reused on home/about/work.
+ * Fixed page background. Drop it once near the top of a page, then wrap the page
+ * content in `<div class="page-body">` so text reads over it.
+ *
+ * Two variants:
+ *   'full'    — ambient atmosphere + the scroll-driven molecular morph + its
+ *               stage label. The HOME page centrepiece; the morph's six stages
+ *               are mapped across the whole document scroll.
+ *   'ambient' — atmosphere ONLY (the default). Same palette, same mood, but no
+ *               competing molecular field and no stage label, so interior pages
+ *               stay quiet and drop a fullscreen WebGL scene's worth of cost.
+ *
+ * The client script needs no branching: `mount()` returns null on a missing
+ * selector, so omitting #bg-field makes the morph mount a clean no-op.
  *
  * Layering (back → front):
- *   .ambient-field  — slow domain-warped fBm atmosphere (depth, this component)
- *   .bg-field       — the molecular MorphField particles (existing character)
+ *   .ambient-field  — slow domain-warped fBm atmosphere (depth)
+ *   .bg-field       — the molecular MorphField particles ('full' only)
  *   .page-body      — content on a translucent scrim (global.css)
  */
+interface Props { variant?: 'full' | 'ambient'; }
+const { variant = 'ambient' } = Astro.props;
+const full = variant === 'full';
 ---
 
 <div class="ambient-field" id="ambient-field" aria-hidden="true"></div>
-<div class="bg-field" id="bg-field" aria-hidden="true"></div>
-<div class="field-tag" id="field-tag" aria-hidden="true">
-  <span class="field-tag__dot"></span><span id="field-tag-label">generative diffusion → caffeine</span>
-</div>
+{full && (
+  <>
+    <div class="bg-field" id="bg-field" aria-hidden="true"></div>
+    <div class="field-tag" id="field-tag" aria-hidden="true">
+      <span class="field-tag__dot"></span><span id="field-tag-label">generative diffusion → caffeine</span>
+    </div>
+  </>
+)}
 
 <script>
   import { mount } from '@/lib/three/core';
@@ -70,6 +87,12 @@
         bloom: { strength: 0.35, radius: 0.5, threshold: 0.2 },
         alpha: true,
         layer: 1, // molecular field — above ambient (0), below hero (2) + content (10)
+        // SCROLL-LINKED → must never be throttled. Without this boost it tied
+        // with the ambient fBm at ~1.0 priority, lost the mount-order tie-break,
+        // and rendered at HALF rate — the morph stair-stepped against scroll.
+        // 0.5 ranks it under the hero (+1) but above ambient, which is slow and
+        // blurred enough to be indistinguishable at 30fps.
+        priorityBoost: 0.5,
         maxPixelRatio: 1.15,
         // FULLSCREEN fill sink: the molecular morph field + its bloom pass fill the
         // whole fixed viewport. Soft additive points behind page content upscale

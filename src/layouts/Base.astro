@@ -102,6 +102,12 @@ const fullTitle = title ? `${title} — ${SITE.name}` : `${SITE.name} — ${SITE
       //     life of the document — guarded by a flag — so navigations never
       //     stack a second scroll listener or a second rAF loop.
       // ============================================================
+      // Damped page scroll + scroll velocity ceiling. Side-effect import: the
+      // module is a window-level singleton that self-inits and manages its own
+      // astro:page-load / before-swap lifecycle. Imported here so EVERY page gets
+      // it, and so it is installed before the scroll-linked scenes mount.
+      import '@/scripts/smooth-scroll';
+
       const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
 
       // ---------------- PER-PAGE: scroll reveal ----------------
