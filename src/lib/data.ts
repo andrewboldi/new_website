@@ -8,6 +8,8 @@ export interface Field {
   title: string;
   blurb: string;
   scene: string; // which three.js scene illustrates it
+  /** pdb basename, REQUIRED by the 'molecule' scene (it loads public/pdb/<pdb>.pdb) */
+  pdb?: string;
   accent: 'blue' | 'cyan' | 'violet' | 'amber';
 }
 
@@ -37,6 +39,9 @@ export const FIELDS: Field[] = [
       'Multi-step organic synthesis at the bench (Stoltz Lab) and deep RL for ' +
       'planning routes — building complex molecules atom by atom.',
     scene: 'molecule',
+    // ineleganolide — the polycyclic norcembranoid from the Stoltz Lab work.
+    // The molecule scene loads this via PDBLoader; without it the card is empty.
+    pdb: 'ineleganolide',
     accent: 'amber',
   },
   {
@@ -63,7 +68,9 @@ export const FIELDS: Field[] = [
     blurb:
       'Electronics, M68k assembly, 3D printing, robotics automation, and shipping ' +
       'software people actually use. A polymath’s toolbox.',
-    scene: 'network',
+    // Was 'network', which duplicated the molecular-ML card's scene. A mechanism
+    // being solved reads as making; a molecular graph does not.
+    scene: 'rubiks',
     accent: 'blue',
   },
 ];

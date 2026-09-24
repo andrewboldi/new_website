@@ -7,6 +7,7 @@ import HintChip from '@/components/home/HintChip.astro';
 import Marquee from '@/components/home/Marquee.astro';
 import CurrentlyStrip from '@/components/home/CurrentlyStrip.astro';
 import ClosingCTA from '@/components/home/ClosingCTA.astro';
+import Scene from '@/components/Scene.astro';
 import { SITE, SOCIALS, url } from '@/lib/site';
 import { FIELDS, PROJECTS } from '@/lib/data';
 import { getCollection } from 'astro:content';
@@ -90,8 +91,10 @@ try {
         </header>
         <div class="fields__grid">
           {FIELDS.map((f, i) => (
-            <article class={`card ticks field field--${f.accent}`} data-reveal data-reveal-delay={i * 60}>
-              <span class="field__idx mono">{String(i + 1).padStart(2, '0')}</span>
+            <article class={`field field--${f.accent}`} data-reveal data-reveal-delay={i * 60}>
+              <div class="field__scene">
+                <Scene name={f.scene as any} pdb={f.pdb} tier="tile" />
+              </div>
               <h3 class="field__title">{f.title}</h3>
               <p class="field__blurb muted">{f.blurb}</p>
             </article>
@@ -256,20 +259,62 @@ try {
   .sec-title { font-size: clamp(2rem, 1.4rem + 3vw, 3.6rem); margin-top: 0.6rem; }
   .eyebrow { display: block; }
 
-  /* ---------- fields ---------- */
-  .fields__grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1rem; }
-  .field { min-height: 220px; display: flex; flex-direction: column; }
-  .field__idx { font-size: 0.72rem; color: var(--ink-faint); }
-  .field__title { font-size: 1.35rem; margin-top: 0.8rem; }
-  .field__blurb { margin-top: 0.7rem; font-size: 0.94rem; }
-  .field--blue:hover { border-color: rgba(0,153,255,0.4); }
-  .field--cyan:hover { border-color: rgba(56,232,200,0.4); }
-  .field--violet:hover { border-color: rgba(157,123,255,0.4); }
-  .field--amber:hover { border-color: rgba(255,179,71,0.4); }
-  .field--blue .field__title { color: var(--blue-soft); }
-  .field--cyan .field__title { color: var(--cyan-soft); }
-  .field--violet .field__title { color: var(--violet); }
-  .field--amber .field__title { color: var(--amber); }
+  /* ---------- fields ----------
+     Each field is a LIVE SCENE, not a card. The old treatment was a .card .ticks
+     box — frosted fill, 14px radius, corner brackets, an 01–06 index — which made
+     these the only static, boxed things on a site whose whole language is live 3D.
+     Two consequences, both deliberate:
+
+     1. NO BOX. The scene dissolves into the particle field behind it via the same
+        radial+linear mask idiom as .lab__scene on /about, so it sits IN the page
+        instead of being clipped out of it. No border, radius, fill, or ticks.
+     2. NO NUMBERS. 01–06 implied a sequence; these are six parallel research
+        areas with no order. The accent moved off the title and onto the hairline
+        under each scene, so the scene carries the colour instead of competing
+        with a coloured heading.
+
+     Scenes mount at tier="tile" (see Scene.astro) — six 'feature' composers would
+     put bloom+filmic+SMAA on one page. Off-screen scenes are skipped wholesale by
+     the scheduler, so this section costs nothing until it is scrolled into view. */
+  .fields__grid {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 3.2rem 2.4rem;
+  }
+  .field { display: flex; flex-direction: column; }
+  .field__scene {
+    height: 200px; position: relative; margin-bottom: 1.1rem;
+    /* Soft edge dissolve — no hard clip, so the scene bleeds into the background
+       field rather than sitting in a cut-out rectangle. */
+    -webkit-mask-image:
+      radial-gradient(115% 115% at 50% 45%, #000 52%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+    mask-image:
+      radial-gradient(115% 115% at 50% 45%, #000 52%, transparent 100%),
+      linear-gradient(90deg, transparent 0%, #000 12%, #000 88%, transparent 100%);
+    -webkit-mask-composite: source-in;
+    mask-composite: intersect;
+  }
+  .field__scene :global(.scene-host) { height: 100%; min-height: 0; }
+  /* The accent lives here: one hairline under the scene, brightening to the
+     field's colour at its left edge and fading out. This is the only chrome. */
+  .field__title {
+    font-size: 1.28rem; line-height: 1.25; padding-top: 0.95rem;
+    border-top: 1px solid var(--line);
+    position: relative;
+  }
+  .field__title::before {
+    content: ''; position: absolute; top: -1px; left: 0; width: 38%; height: 1px;
+  }
+  .field__blurb { margin-top: 0.6rem; font-size: 0.92rem; max-width: 46ch; }
+  .field--blue .field__title::before { background: linear-gradient(90deg, var(--blue), transparent); }
+  .field--cyan .field__title::before { background: linear-gradient(90deg, var(--cyan), transparent); }
+  .field--violet .field__title::before { background: linear-gradient(90deg, var(--violet), transparent); }
+  .field--amber .field__title::before { background: linear-gradient(90deg, var(--amber), transparent); }
+
+  @media (max-width: 760px) {
+    .fields__grid { gap: 2.4rem; }
+    .field__scene { height: 168px; }
+  }
 
   /* ---------- work teaser ---------- */
   .work-teaser__list { display: flex; flex-direction: column; border-top: 1px solid var(--line); }

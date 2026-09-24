@@ -20,9 +20,15 @@ interface Props {
   label?: string;
   /** height when not absolutely positioned by the parent */
   height?: string;
+  /**
+   * Override the registry's per-scene quality tier. Pass 'tile' when the scene
+   * is small or several appear at once (e.g. the home page field grid) — the
+   * registry's default tier assumes the scene's natural, near-fullwidth size.
+   */
+  tier?: 'feature' | 'tile';
 }
 
-const { name, pdb, class: klass = '', label, height } = Astro.props;
+const { name, pdb, class: klass = '', label, height, tier } = Astro.props;
 const labels: Record<SceneName, string> = {
   network: 'A network of molecules drifting and forming transient bonds.',
   molecule: 'A rotating ball-and-stick model of a real molecule.',
@@ -49,6 +55,7 @@ const labels: Record<SceneName, string> = {
 <div
   class={`scene-host scene-embed ${klass}`}
   data-scene={name}
+  data-tier={tier}
   data-pdb={pdb ? url(`/pdb/${pdb}.pdb`) : undefined}
   role="img"
   aria-label={label ?? labels[name]}

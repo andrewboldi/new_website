@@ -82,10 +82,15 @@ const BLOOM: Record<SceneName, BloomOpts> = {
 export async function mountScene(
   host: HTMLElement,
   name: SceneName,
-  extra: { pdb?: string } = {},
+  extra: { pdb?: string; tier?: SceneTier } = {},
 ) {
   const bloom = BLOOM[name];
-  const tier = TIER[name];
+  // TIER[name] is the scene's tier at its NATURAL size — the big about-page rows
+  // where one or two are on screen. A caller placing the same scene as a small
+  // card in a grid can force the lean path, because six 'feature' composers
+  // (bloom + filmic + SMAA each) on one page is exactly the GPU thrash the
+  // single-context refactor exists to avoid. Size, not identity, decides cost.
+  const tier = extra.tier ?? TIER[name];
   switch (name) {
     case 'network': {
       const { molecularNetwork } = await import('./MolecularNetwork');
@@ -177,6 +182,9 @@ export function autoMountScenes() {
   const hosts = document.querySelectorAll<HTMLElement>('[data-scene]:not([data-mounted])');
   hosts.forEach((host) => {
     const name = host.dataset.scene as SceneName;
-    mountScene(host, name, { pdb: host.dataset.pdb });
+    mountScene(host, name, {
+      pdb: host.dataset.pdb,
+      tier: (host.dataset.tier as SceneTier | undefined) || undefined,
+    });
   });
 }
